@@ -9,7 +9,7 @@ module Control.Applicative.Perm
 import Control.Applicative (Alternative)
 import qualified Control.Applicative.Perm.Internal as Internal
 
-type PermT = Internal.PermT Internal.Applicative
+type PermT = Internal.PermT Internal.Alternative
 
 runPermT :: Alternative m => PermT m a -> m a
 runPermT = Internal.runApplicativePermT

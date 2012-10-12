@@ -9,7 +9,7 @@ module Control.Monad.Perm
 import qualified Control.Applicative.Perm.Internal as Internal
 import Control.Monad (MonadPlus)
 
-type PermT = Internal.PermT Internal.Monad
+type PermT = Internal.PermT Internal.MonadPlus
 
 runPermT :: MonadPlus m => PermT m a -> m a
 runPermT = Internal.runMonadPermT
