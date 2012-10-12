@@ -66,18 +66,24 @@ runPermT = lower
     lower (Choice a xs) = foldr ((<|>) . f) (maybe empty pure a) xs
     f (Branch perm m) = m <**> runPermT perm
 
+-- | A version of 'runPermT' that can be used with 'MonadPlus' for @m@
 runPermT' :: MonadPlus m => PermT m a -> m a
 runPermT' = lower
   where
     lower (Choice a xs) = foldr (mplus . f) (maybe mzero return a) xs
     f (Branch perm m) = flip ($) `liftM` m `ap` runPermT' perm
 
+-- | A version of 'lift' without the @'Monad' m@ constraint
 liftPerm :: m a -> PermT m a
 liftPerm = Choice empty . pure . liftBranch
 
 liftBranch :: m a -> Branch m a
 liftBranch = Branch (Choice (pure id) mempty)
 
+{- |
+Lift a natural transformation from @m@ to @n@ into a natural transformation
+from @'PermT' m@ to @'PermT' n@.
+-}
 hoistPerm :: (forall a . m a -> n a) -> PermT m b -> PermT n b
 hoistPerm f (Choice a xs) = Choice a (hoistBranch f <$> xs)
 
