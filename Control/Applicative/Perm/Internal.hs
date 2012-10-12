@@ -100,7 +100,6 @@ thenB :: Branch c m a -> PermT c m b -> Branch c m b
 Ap perm m `thenB` n = (perm *> fmap const n) `Ap` m
 Bind k m `thenB` n = Bind ((>> n) . k) m
 
-
 runApplicativePermT :: Applicative.Alternative m => PermT Alternative m a -> m a
 runApplicativePermT = lower
   where
