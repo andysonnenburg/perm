@@ -11,22 +11,17 @@ module Control.Applicative.Perm
        ( PermT
        , runPermT
        , runPermT'
-       , runPermT''
        , liftPerm
        , hoistPerm
        ) where
 
 import Control.Applicative
-import Control.Monad (MonadPlus (..), ap, liftM, return)
+import Control.Monad (MonadPlus (mplus, mzero), ap, liftM, return)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
-import Data.Functor.Plus (Functor (fmap),
-                          Apply ((<.>)),
-                          Alt ((<!>)),
-                          Plus (zero))
-import Data.Monoid (mempty)
-import Data.Semigroup ((<>))
+import Data.Functor (Functor (fmap))
+import Data.Monoid (mappend, mempty)
 
 import Prelude (Maybe (..), ($), (.), flip, id, maybe)
 
@@ -40,34 +35,18 @@ instance Functor (PermT m) where
 instance Functor (Branch m) where
   fmap f (Branch perm m) = Branch (fmap (f .) perm) m
 
-instance Apply (PermT m) where
-  (<.>) = ap' (<.>)
-
 instance Applicative (PermT m) where
   pure a = Choice (pure a) mempty
-  (<*>) = ap' (<*>)
-
-instance Alt (PermT m) where
-  (<!>) = plus
-
-instance Plus (PermT m) where
-  zero = Choice zero mempty
+  f@(Choice f' fs) <*> a@(Choice a' as) =
+    Choice (f' <*> a') (fmap (`apB` a) fs `mappend` fmap (f `apP`) as)
 
 instance Alternative (PermT m) where
   empty = Choice empty mempty
-  (<|>) = plus
+  m@(Choice (Just _) _) <|> _ = m
+  Choice Nothing xs <|> Choice b ys = Choice b (xs `mappend` ys)
 
 instance MonadTrans PermT where
   lift = liftPerm
-
-ap' :: (Maybe (a -> b) -> Maybe a -> Maybe b) ->
-       PermT m (a -> b) -> PermT m a -> PermT m b
-ap' apMaybe f@(Choice f' fs) a@(Choice a' as) =
-  Choice (f' `apMaybe` a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
-
-plus :: PermT m a -> PermT m a -> PermT m a
-plus m@(Choice (Just _) _) _ = m
-plus (Choice Nothing xs) (Choice b ys) = Choice b (xs <> ys)
 
 apP :: PermT m (a -> b) -> Branch m a -> Branch m b
 apP f (Branch perm m) = Branch (f .@ perm) m
@@ -92,12 +71,6 @@ runPermT' = lower
   where
     lower (Choice a xs) = foldr (mplus . f) (maybe mzero return a) xs
     f (Branch perm m) = flip ($) `liftM` m `ap` runPermT' perm
-
-runPermT'' :: (Applicative m, Plus m) => PermT m a -> m a
-runPermT'' = lower
-  where
-    lower (Choice a xs) = foldr ((<!>) . f) (maybe zero pure a) xs
-    f (Branch perm m) = m <**> runPermT'' perm
 
 liftPerm :: m a -> PermT m a
 liftPerm = Choice empty . pure . liftBranch
