@@ -1,4 +1,8 @@
-{-# LANGUAGE DataKinds, Rank2Types #-}
+{-# LANGUAGE CPP #-}
+#ifdef LANGUAGE_DataKinds
+{-# LANGUAGE DataKinds #-}
+#endif
+{-# LANGUAGE Rank2Types #-}
 {- |
 License: BSD-style (see the file LICENSE)
 Maintainer: Andy Sonnenburg <andy22286@gmail.com>

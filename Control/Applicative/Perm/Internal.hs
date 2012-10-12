@@ -1,6 +1,11 @@
+{-# LANGUAGE CPP #-}
+#ifdef LANGUAGE_DataKinds
+{-# LANGUAGE DataKinds #-}
+#else
+{-# LANGUAGE EmptyDataDecls #-}
+#endif
 {-# LANGUAGE
-    DataKinds
-  , ExistentialQuantification
+    ExistentialQuantification
   , FlexibleInstances
   , GADTs
   , Rank2Types #-}
@@ -12,7 +17,12 @@ Portability: non-portable
 -}
 module Control.Applicative.Perm.Internal
        ( PermT
+#ifdef LANGUAGE_DataKinds
        , Constraint (..)
+#else
+       , Alternative
+       , MonadPlus
+#endif
        , runApplicativePermT
        , runMonadPermT
        , liftPerm
@@ -32,9 +42,14 @@ import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
 
 data PermT c m a = Choice (Maybe a) [Branch c m a]
 
+#ifdef LANGUAGE_DataKinds
 data Constraint
   = Alternative
   | MonadPlus
+#else
+data Alternative
+data MonadPlus
+#endif
 
 data Branch c m b where
   Ap :: PermT c m (a -> b) -> m a -> Branch c m b
