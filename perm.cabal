@@ -1,0 +1,26 @@
+name:                perm
+version:             0.1.0.0
+cabal-version:       >= 1.10
+-- synopsis:            
+-- description:         
+license:             BSD3
+license-file:        LICENSE
+author:              Andy Sonnenburg
+maintainer:          Andy Sonnenburg <andy22286@gmail.com>
+category:            Control
+homepage:            https://github.com/sonyandy/perm
+bug-reports:         https://github.com/sonyandy/perm/issues
+build-type:          Simple
+
+library
+  default-language:    Haskell98
+  exposed-modules:     Control.Applicative.Perm
+  build-depends:
+    base >= 4 && < 5,
+    semigroups >= 0.8.3.1 && < 0.9,
+    transformers >= 0.2 && < 0.4,
+    semigroupoids
+  ghc-options:         -Wall
+  other-extensions:
+    ExistentialQuantification
+    Rank2Types
