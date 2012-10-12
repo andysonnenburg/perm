@@ -1,4 +1,10 @@
 {-# LANGUAGE DataKinds, Rank2Types #-}
+{- |
+License: BSD-style (see the file LICENSE)
+Maintainer: Andy Sonnenburg <andy22286@gmail.com>
+Stability: experimental
+Portability: non-portable
+-}
 module Control.Applicative.Perm
        ( PermT
        , runPermT
