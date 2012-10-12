@@ -14,7 +14,11 @@ build-type:          Simple
 
 library
   default-language: Haskell98
-  exposed-modules: Control.Applicative.Perm
+  exposed-modules:
+    Control.Applicative.Perm
+    Control.Monad.Perm
+  other-modules:
+    Control.Applicative.Perm.Internal
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4

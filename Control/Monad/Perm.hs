@@ -1,18 +1,18 @@
 {-# LANGUAGE DataKinds, Rank2Types #-}
-module Control.Applicative.Perm
+module Control.Monad.Perm
        ( PermT
        , runPermT
        , liftPerm
        , hoistPerm
        ) where
 
-import Control.Applicative (Alternative)
 import qualified Control.Applicative.Perm.Internal as Internal
+import Control.Monad (MonadPlus)
 
-type PermT = Internal.PermT Internal.Applicative
+type PermT = Internal.PermT Internal.Monad
 
-runPermT :: Alternative m => PermT m a -> m a
-runPermT = Internal.runApplicativePermT
+runPermT :: MonadPlus m => PermT m a -> m a
+runPermT = Internal.runMonadPermT
 
 liftPerm :: m a -> PermT m a
 liftPerm = Internal.liftPerm
