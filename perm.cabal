@@ -24,6 +24,7 @@ library
     transformers >= 0.2 && < 0.4
   ghc-options: -Wall
   other-extensions:
+    ConstraintKinds
     ExistentialQuantification
     FlexibleInstances
     GADTs

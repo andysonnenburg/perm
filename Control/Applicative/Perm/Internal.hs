@@ -1,5 +1,6 @@
 {-# LANGUAGE
-    ExistentialQuantification
+    ConstraintKinds
+  , ExistentialQuantification
   , FlexibleInstances
   , GADTs
   , Rank2Types #-}
@@ -44,10 +45,10 @@ instance Applicative (PermT c m) where
   pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
     Choice (f' <*> a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
-  (*>) = then' (*>)
+  (*>) = liftThen (*>)
 
 instance Alternative (PermT c m) where
-  empty = zero empty
+  empty = liftZero empty
   (<|>) = plus
 
 instance Monad (PermT Monad m) where
@@ -55,11 +56,11 @@ instance Monad (PermT Monad m) where
   Choice Nothing ms >>= k = Choice Nothing (map (bindP k) ms)
   Choice (Just a) ms >>= k = case k a of
     Choice a' ms' -> Choice a' (map (bindP k) ms <> ms')
-  (>>) = then' (>>)
+  (>>) = liftThen (>>)
   fail _ = Choice mzero mempty
 
 instance MonadPlus (PermT Monad m) where
-  mzero = zero mzero
+  mzero = liftZero mzero
   mplus = plus
 
 instance MonadTrans (PermT c) where
@@ -80,12 +81,12 @@ flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
 bindP :: (a -> PermT Monad m b) -> Branch Monad m a -> Branch Monad m b
-bindP k (Ap perm m) = Bind (\ a -> perm >>= k . ($ a)) m
-bindP k (Bind k' m) = Bind (k' >=> k) m
+bindP k (Ap perm m) = Bind (\ a -> k . ($ a) =<< perm) m
+bindP k (Bind k' m) = Bind (k <=< k') m
 
-then' :: (Maybe a -> Maybe b -> Maybe b) ->
-         PermT c m a -> PermT c m b -> PermT c m b
-then' thenMaybe m@(Choice m' ms) n@(Choice n' ns) =
+liftThen :: (Maybe a -> Maybe b -> Maybe b) ->
+            PermT c m a -> PermT c m b -> PermT c m b
+liftThen thenMaybe m@(Choice m' ms) n@(Choice n' ns) =
   Choice (m' `thenMaybe` n') (map (`thenB` n) ms <> map (m `thenP`) ns)
 
 thenP :: PermT c m a -> Branch c m b -> Branch c m b
@@ -96,8 +97,8 @@ thenB :: Branch c m a -> PermT c m b -> Branch c m b
 Ap perm m `thenB` n = (perm *> fmap const n) `Ap` m
 Bind k m `thenB` n = Bind ((>> n) . k) m
 
-zero :: Maybe a -> PermT c m a
-zero zeroMaybe = Choice zeroMaybe mempty
+liftZero :: Maybe a -> PermT c m a
+liftZero zeroMaybe = Choice zeroMaybe mempty
 
 plus :: PermT c m a -> PermT c m a -> PermT c m a
 m@(Choice (Just _) _) `plus` _ = m
