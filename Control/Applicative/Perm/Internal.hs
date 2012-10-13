@@ -1,15 +1,10 @@
-{-# LANGUAGE CPP #-}
-#ifdef LANGUAGE_DataKinds
-{-# LANGUAGE DataKinds #-}
-#else
-{-# LANGUAGE EmptyDataDecls #-}
-#endif
 {-# LANGUAGE
     ExistentialQuantification
   , FlexibleInstances
   , GADTs
   , Rank2Types #-}
 {- |
+Copyright: Andy Sonnenburg (c) 2012
 License: BSD-style (see the file LICENSE)
 Maintainer: Andy Sonnenburg <andy22286@gmail.com>
 Stability: experimental
@@ -17,22 +12,14 @@ Portability: non-portable
 -}
 module Control.Applicative.Perm.Internal
        ( PermT
-#ifdef LANGUAGE_DataKinds
-       , Constraint (..)
-#else
-       , Alternative
-       , MonadPlus
-#endif
        , runApplicativePermT
        , runMonadPermT
        , liftPerm
        , hoistPerm
        ) where
 
-import Control.Applicative hiding (Alternative)
-import qualified Control.Applicative as Applicative (Alternative)
-import Control.Monad hiding (MonadPlus)
-import qualified Control.Monad as Monad (MonadPlus)
+import Control.Applicative
+import Control.Monad
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
@@ -42,18 +29,9 @@ import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
 
 data PermT c m a = Choice (Maybe a) [Branch c m a]
 
-#ifdef LANGUAGE_DataKinds
-data Constraint
-  = Alternative
-  | MonadPlus
-#else
-data Alternative
-data MonadPlus
-#endif
-
 data Branch c m b where
   Ap :: PermT c m (a -> b) -> m a -> Branch c m b
-  Bind :: (a -> PermT MonadPlus m b) -> m a -> Branch MonadPlus m b
+  Bind :: (a -> PermT Monad m b) -> m a -> Branch Monad m b
 
 instance Functor (PermT c m) where
   fmap f (Choice a xs) = Choice (f <$> a) (fmap f <$> xs)
@@ -67,12 +45,11 @@ instance Applicative (PermT c m) where
   f@(Choice f' fs) <*> a@(Choice a' as) =
     Choice (f' <*> a') (fmap (`apB` a) fs `mappend` fmap (f `apP`) as)
 
-instance Applicative.Alternative (PermT c m) where
+instance Alternative (PermT c m) where
   empty = Choice empty mempty
-  m@(Choice (Just _) _) <|> _ = m
-  Choice Nothing xs <|> Choice b ys = Choice b (xs `mappend` ys)
+  (<|>) = plus
 
-instance Monad (PermT MonadPlus m) where
+instance Monad (PermT Monad m) where
   return a = Choice (return a) mempty
   Choice Nothing ms >>= k = Choice Nothing (map (bindP k) ms)
   Choice (Just a) ms >>= k = case k a of
@@ -81,10 +58,9 @@ instance Monad (PermT MonadPlus m) where
     Choice (m' >> n') (map (`thenB` n) ms `mappend` map (m `thenP`) ns)
   fail _ = Choice mzero mempty
 
-instance Monad.MonadPlus (PermT MonadPlus m) where
+instance MonadPlus (PermT Monad m) where
   mzero = Choice mzero mempty
-  m@(Choice (Just _) _) `mplus` _ = m
-  Choice Nothing xs `mplus` Choice b ys = Choice b (xs `mappend` ys)
+  mplus = plus
 
 instance MonadTrans (PermT c) where
   lift = liftPerm
@@ -103,7 +79,7 @@ Bind k m `apB` a = Bind ((`ap` a) . k) m
 flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
-bindP :: (a -> PermT MonadPlus m b) -> Branch MonadPlus m a -> Branch MonadPlus m b
+bindP :: (a -> PermT Monad m b) -> Branch Monad m a -> Branch Monad m b
 bindP k (Ap perm m) = Bind (\ a -> perm >>= k . ($ a)) m
 bindP k (Bind k' m) = Bind (k' >=> k) m
 
@@ -115,20 +91,24 @@ thenB :: Branch c m a -> PermT c m b -> Branch c m b
 Ap perm m `thenB` n = (perm *> fmap const n) `Ap` m
 Bind k m `thenB` n = Bind ((>> n) . k) m
 
-runApplicativePermT :: Applicative.Alternative m => PermT Alternative m a -> m a
+plus :: PermT c m a -> PermT c m a -> PermT c m a
+m@(Choice (Just _) _) `plus` _ = m
+Choice Nothing xs `plus` Choice b ys = Choice b (xs `mappend` ys)
+
+runApplicativePermT :: Alternative m => PermT Applicative m a -> m a
 runApplicativePermT = lower
   where
     lower (Choice a xs) = foldr ((<|>) . f) (maybe empty pure a) xs
     f (perm `Ap` m) = m <**> runApplicativePermT perm
 
-runMonadPermT :: Monad.MonadPlus m => PermT MonadPlus m a -> m a
+runMonadPermT :: MonadPlus m => PermT Monad m a -> m a
 runMonadPermT = lower
   where
     lower (Choice a xs) = foldr (mplus . f) (maybe mzero return a) xs
     f (perm `Ap` m) = flip ($) `liftM` m `ap` runMonadPermT perm
     f (Bind k m) = m >>= runMonadPermT . k
 
--- | A version of 'lift' without the @MonadPlus' m@ constraint
+-- | A version of 'lift' without the @'Monad' m@ constraint
 liftPerm :: m a -> PermT c m a
 liftPerm = Choice empty . pure . liftBranch
 

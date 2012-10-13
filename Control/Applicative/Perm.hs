@@ -1,9 +1,6 @@
-{-# LANGUAGE CPP #-}
-#ifdef LANGUAGE_DataKinds
-{-# LANGUAGE DataKinds #-}
-#endif
 {-# LANGUAGE Rank2Types #-}
 {- |
+Copyright: Andy Sonnenburg (c) 2012
 License: BSD-style (see the file LICENSE)
 Maintainer: Andy Sonnenburg <andy22286@gmail.com>
 Stability: experimental
@@ -16,16 +13,11 @@ module Control.Applicative.Perm
        , hoistPerm
        ) where
 
-import Control.Applicative (Alternative)
-import qualified Control.Applicative.Perm.Internal as Internal
+import Control.Applicative (Alternative, Applicative)
+import Control.Applicative.Perm.Internal (PermT,
+                                          hoistPerm,
+                                          liftPerm,
+                                          runApplicativePermT)
 
-type PermT = Internal.PermT Internal.Alternative
-
-runPermT :: Alternative m => PermT m a -> m a
-runPermT = Internal.runApplicativePermT
-
-liftPerm :: m a -> PermT m a
-liftPerm = Internal.liftPerm
-
-hoistPerm :: (forall a . m a -> n a) -> PermT m b -> PermT n b
-hoistPerm = Internal.hoistPerm
+runPermT :: Alternative m => PermT Applicative m a -> m a
+runPermT = runApplicativePermT

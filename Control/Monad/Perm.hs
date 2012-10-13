@@ -1,9 +1,6 @@
-{-# LANGUAGE CPP #-}
-#ifdef LANGUAGE_DataKinds
-{-# LANGUAGE DataKinds #-}
-#endif
 {-# LANGUAGE Rank2Types #-}
 {- |
+Copyright: Andy Sonnenburg (c) 2012
 License: BSD-style (see the file LICENSE)
 Maintainer: Andy Sonnenburg <andy22286@gmail.com>
 Stability: experimental
@@ -16,16 +13,11 @@ module Control.Monad.Perm
        , hoistPerm
        ) where
 
-import qualified Control.Applicative.Perm.Internal as Internal
+import Control.Applicative.Perm.Internal (PermT,
+                                          liftPerm,
+                                          hoistPerm,
+                                          runMonadPermT)
 import Control.Monad (MonadPlus)
 
-type PermT = Internal.PermT Internal.MonadPlus
-
-runPermT :: MonadPlus m => PermT m a -> m a
-runPermT = Internal.runMonadPermT
-
-liftPerm :: m a -> PermT m a
-liftPerm = Internal.liftPerm
-
-hoistPerm :: (forall a . m a -> n a) -> PermT m b -> PermT n b
-hoistPerm = Internal.hoistPerm
+runPermT :: MonadPlus m => PermT Monad m a -> m a
+runPermT = runMonadPermT
