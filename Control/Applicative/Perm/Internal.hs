@@ -23,7 +23,7 @@ import Control.Monad
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
-import Data.Monoid (mappend, mempty)
+import Data.Monoid ((<>), mempty)
 
 import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
 
@@ -43,23 +43,23 @@ instance Functor (Branch c m) where
 instance Applicative (PermT c m) where
   pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
-    Choice (f' <*> a') (fmap (`apB` a) fs `mappend` fmap (f `apP`) as)
+    Choice (f' <*> a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
+  (*>) = then' (*>)
 
 instance Alternative (PermT c m) where
-  empty = Choice empty mempty
+  empty = zero empty
   (<|>) = plus
 
 instance Monad (PermT Monad m) where
   return a = Choice (return a) mempty
   Choice Nothing ms >>= k = Choice Nothing (map (bindP k) ms)
   Choice (Just a) ms >>= k = case k a of
-    Choice a' ms' -> Choice a' (map (bindP k) ms `mappend` ms')
-  m@(Choice m' ms) >> n@(Choice n' ns) =
-    Choice (m' >> n') (map (`thenB` n) ms `mappend` map (m `thenP`) ns)
+    Choice a' ms' -> Choice a' (map (bindP k) ms <> ms')
+  (>>) = then' (>>)
   fail _ = Choice mzero mempty
 
 instance MonadPlus (PermT Monad m) where
-  mzero = Choice mzero mempty
+  mzero = zero mzero
   mplus = plus
 
 instance MonadTrans (PermT c) where
@@ -83,6 +83,11 @@ bindP :: (a -> PermT Monad m b) -> Branch Monad m a -> Branch Monad m b
 bindP k (Ap perm m) = Bind (\ a -> perm >>= k . ($ a)) m
 bindP k (Bind k' m) = Bind (k' >=> k) m
 
+then' :: (Maybe a -> Maybe b -> Maybe b) ->
+         PermT c m a -> PermT c m b -> PermT c m b
+then' thenMaybe m@(Choice m' ms) n@(Choice n' ns) =
+  Choice (m' `thenMaybe` n') (map (`thenB` n) ms <> map (m `thenP`) ns)
+
 thenP :: PermT c m a -> Branch c m b -> Branch c m b
 m `thenP` Ap perm m' = (m *> perm) `Ap` m'
 m `thenP` Bind k m' = Bind ((m >>) . k) m'
@@ -91,9 +96,12 @@ thenB :: Branch c m a -> PermT c m b -> Branch c m b
 Ap perm m `thenB` n = (perm *> fmap const n) `Ap` m
 Bind k m `thenB` n = Bind ((>> n) . k) m
 
+zero :: Maybe a -> PermT c m a
+zero zeroMaybe = Choice zeroMaybe mempty
+
 plus :: PermT c m a -> PermT c m a -> PermT c m a
 m@(Choice (Just _) _) `plus` _ = m
-Choice Nothing xs `plus` Choice b ys = Choice b (xs `mappend` ys)
+Choice Nothing xs `plus` Choice b ys = Choice b (xs <> ys)
 
 runApplicativePermT :: Alternative m => PermT Applicative m a -> m a
 runApplicativePermT = lower
