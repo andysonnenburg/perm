@@ -19,5 +19,6 @@ import Control.Applicative.Perm.Internal (PermT,
                                           runMonadPermT)
 import Control.Monad (MonadPlus)
 
+-- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
 runPermT :: MonadPlus m => PermT Monad m a -> m a
 runPermT = runMonadPermT

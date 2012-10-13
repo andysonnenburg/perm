@@ -19,5 +19,6 @@ import Control.Applicative.Perm.Internal (PermT,
                                           liftPerm,
                                           runApplicativePermT)
 
+-- | Unwrap a 'PermT', combining actions using the 'Alternative' for @f@.
 runPermT :: Alternative m => PermT Applicative m a -> m a
 runPermT = runApplicativePermT

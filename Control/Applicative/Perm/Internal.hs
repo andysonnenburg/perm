@@ -28,6 +28,10 @@ import Data.Monoid ((<>), mempty)
 
 import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
 
+{- |
+The permutation action, available as either an 'Applicative' or a 'Monad',
+determined by the combinators used.
+-}
 data PermT c m a = Choice (Maybe a) [Branch c m a]
 
 data Branch c m b where
@@ -104,12 +108,14 @@ plus :: PermT c m a -> PermT c m a -> PermT c m a
 m@(Choice (Just _) _) `plus` _ = m
 Choice Nothing xs `plus` Choice b ys = Choice b (xs <> ys)
 
+-- | Unwrap a 'PermT', combining actions using the 'Alternative' for @f@.
 runApplicativePermT :: Alternative m => PermT Applicative m a -> m a
 runApplicativePermT = lower
   where
     lower (Choice a xs) = foldr ((<|>) . f) (maybe empty pure a) xs
     f (perm `Ap` m) = m <**> runApplicativePermT perm
 
+-- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
 runMonadPermT :: MonadPlus m => PermT Monad m a -> m a
 runMonadPermT = lower
   where
@@ -126,7 +132,7 @@ liftBranch = Ap (Choice (pure id) mempty)
 
 {- |
 Lift a natural transformation from @m@ to @n@ into a natural transformation
-from @'PermT' m@ to @'PermT' n@.
+from @'PermT' c m@ to @'PermT' c n@.
 -}
 hoistPerm :: (forall a . m a -> n a) -> PermT c m b -> PermT c n b
 hoistPerm f (Choice a xs) = Choice a (hoistBranch f <$> xs)
