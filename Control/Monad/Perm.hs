@@ -13,12 +13,7 @@ module Control.Monad.Perm
        , hoistPerm
        ) where
 
-import Control.Applicative.Perm.Internal (PermT,
-                                          liftPerm,
-                                          hoistPerm,
-                                          runMonadPermT)
-import Control.Monad (MonadPlus)
-
--- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
-runPermT :: MonadPlus m => PermT Monad m a -> m a
-runPermT = runMonadPermT
+import Control.Monad.Perm.Internal (PermT,
+                                    liftPerm,
+                                    hoistPerm,
+                                    runPermT)

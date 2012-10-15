@@ -1,9 +1,11 @@
 {-# LANGUAGE
-    ConstraintKinds
+    DataKinds
   , ExistentialQuantification
   , FlexibleInstances
   , GADTs
-  , Rank2Types #-}
+  , MultiParamTypeClasses
+  , Rank2Types
+  , UndecidableInstances #-}
 {- |
 Copyright: Andy Sonnenburg (c) 2012
 License: BSD-style (see the file LICENSE)
@@ -11,22 +13,31 @@ Maintainer: Andy Sonnenburg <andy22286@gmail.com>
 Stability: experimental
 Portability: non-portable
 -}
-module Control.Applicative.Perm.Internal
-       ( PermT
-       , runApplicativePermT
-       , runMonadPermT
+module Control.Monad.Perm.Internal
+       ( Perm
+       , runPerm
+       , PermT
+       , runPermT
        , liftPerm
        , hoistPerm
        ) where
 
-import Control.Applicative
-import Control.Monad
+import Control.Applicative hiding (Applicative)
+import qualified Control.Applicative as Applicative (Applicative)
+import Control.Monad hiding (Monad)
+import qualified Control.Monad as Monad (Monad)
+import Control.Monad.Error.Class
+import Control.Monad.IO.Class
+import Control.Monad.RWS.Class
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
 import Data.Monoid ((<>), mempty)
 
 import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
+
+-- | The permutation applicative
+type Perm = PermT Applicative
 
 {- |
 The permutation action, available as either an 'Applicative' or a 'Monad',
@@ -38,6 +49,8 @@ data Branch c m b where
   Ap :: PermT c m (a -> b) -> m a -> Branch c m b
   Bind :: (a -> PermT Monad m b) -> m a -> Branch Monad m b
 
+data Constraint = Applicative | Monad
+
 instance Functor (PermT c m) where
   fmap f (Choice a xs) = Choice (f <$> a) (fmap f <$> xs)
 
@@ -45,7 +58,7 @@ instance Functor (Branch c m) where
   fmap f (Ap perm m) = Ap (fmap (f .) perm) m
   fmap f (Bind k m) = Bind (fmap f . k) m
 
-instance Applicative (PermT c m) where
+instance Applicative.Applicative (PermT c m) where
   pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
     Choice (f' <*> a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
@@ -55,7 +68,7 @@ instance Alternative (PermT c m) where
   empty = liftZero empty
   (<|>) = plus
 
-instance Monad (PermT Monad m) where
+instance Monad.Monad (PermT Monad m) where
   return a = Choice (return a) mempty
   Choice Nothing ms >>= k = Choice Nothing (map (bindP k) ms)
   Choice (Just a) ms >>= k = case k a of
@@ -70,18 +83,41 @@ instance MonadPlus (PermT Monad m) where
 instance MonadTrans (PermT c) where
   lift = liftPerm
 
+instance MonadIO m => MonadIO (PermT Monad m) where
+  liftIO = lift . liftIO
+
+instance MonadError e m => MonadError e (PermT Monad m) where
+  throwError = lift . throwError
+
+instance MonadRWS r w s m => MonadRWS r w s (PermT Monad m)
+
+instance MonadReader r m => MonadReader r (PermT Monad m) where
+  ask = lift ask
+  local f (Choice a xs) = Choice a (map (localBranch f) xs)
+
+localBranch :: MonadReader r m => (r -> r) -> Branch Monad m a -> Branch Monad m a
+localBranch f (Ap perm m) = Ap (local f perm) (local f m)
+localBranch f (Bind k m) = Bind (local f . k) (local f m)
+
+instance MonadState s m => MonadState s (PermT Monad m) where
+  get = lift get
+  put = lift . put
+
+instance MonadWriter w m => MonadWriter w (PermT Monad m) where
+  tell = lift . tell
+
 apP :: PermT c m (a -> b) -> Branch c m a -> Branch c m b
 f `apP` Ap perm m = (f .@ perm) `Ap` m
 f `apP` Bind k m = Bind ((f `ap`) . k) m
 
-(.@) :: Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
+(.@) :: Applicative.Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
 (.@) = liftA2 (.)
 
 apB :: Branch c m (a -> b) -> PermT c m a -> Branch c m b
 Ap perm m `apB` a = flipA2 perm a `Ap` m
 Bind k m `apB` a = Bind ((`ap` a) . k) m
 
-flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
+flipA2 :: Applicative.Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
 bindP :: (a -> PermT Monad m b) -> Branch Monad m a -> Branch Monad m b
@@ -108,20 +144,20 @@ plus :: PermT c m a -> PermT c m a -> PermT c m a
 m@(Choice (Just _) _) `plus` _ = m
 Choice Nothing xs `plus` Choice b ys = Choice b (xs <> ys)
 
--- | Unwrap a 'PermT', combining actions using the 'Alternative' for @f@.
-runApplicativePermT :: Alternative m => PermT Applicative m a -> m a
-runApplicativePermT = lower
+-- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
+runPerm :: Alternative m => Perm m a -> m a
+runPerm = lower
   where
     lower (Choice a xs) = foldr ((<|>) . f) (maybe empty pure a) xs
-    f (perm `Ap` m) = m <**> runApplicativePermT perm
+    f (perm `Ap` m) = m <**> runPerm perm
 
 -- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
-runMonadPermT :: MonadPlus m => PermT Monad m a -> m a
-runMonadPermT = lower
+runPermT :: MonadPlus m => PermT c m a -> m a
+runPermT = lower
   where
     lower (Choice a xs) = foldr (mplus . f) (maybe mzero return a) xs
-    f (perm `Ap` m) = flip ($) `liftM` m `ap` runMonadPermT perm
-    f (Bind k m) = m >>= runMonadPermT . k
+    f (perm `Ap` m) = flip ($) `liftM` m `ap` runPermT perm
+    f (Bind k m) = m >>= runPermT . k
 
 -- | A version of 'lift' without the @'Monad' m@ constraint
 liftPerm :: m a -> PermT c m a

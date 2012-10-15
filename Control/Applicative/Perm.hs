@@ -7,18 +7,13 @@ Stability: experimental
 Portability: non-portable
 -}
 module Control.Applicative.Perm
-       ( PermT
-       , runPermT
+       ( Perm
+       , runPerm
        , liftPerm
        , hoistPerm
        ) where
 
-import Control.Applicative (Alternative, Applicative)
-import Control.Applicative.Perm.Internal (PermT,
-                                          hoistPerm,
-                                          liftPerm,
-                                          runApplicativePermT)
-
--- | Unwrap a 'PermT', combining actions using the 'Alternative' for @f@.
-runPermT :: Alternative m => PermT Applicative m a -> m a
-runPermT = runApplicativePermT
+import Control.Monad.Perm.Internal (Perm,
+                                    hoistPerm,
+                                    liftPerm,
+                                    runPerm)

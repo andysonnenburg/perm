@@ -18,14 +18,16 @@ library
     Control.Applicative.Perm
     Control.Monad.Perm
   other-modules:
-    Control.Applicative.Perm.Internal
+    Control.Monad.Perm.Internal
   build-depends:
     base >= 4 && < 5,
-    transformers >= 0.2 && < 0.4
+    transformers >= 0.2 && < 0.4,
+    mtl
   ghc-options: -Wall
   other-extensions:
-    ConstraintKinds
     ExistentialQuantification
     FlexibleInstances
     GADTs
+    MultiParamTypeClasses
     Rank2Types
+    UndecidableInstances
