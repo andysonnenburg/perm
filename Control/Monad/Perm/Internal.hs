@@ -5,8 +5,7 @@
 {-# LANGUAGE EmptyDataDecls #-}
 #endif
 {-# LANGUAGE
-    ExistentialQuantification
-  , FlexibleInstances
+    FlexibleInstances
   , GADTs
   , MultiParamTypeClasses
   , Rank2Types
@@ -32,6 +31,7 @@ import Control.Applicative hiding (Applicative)
 import qualified Control.Applicative as Applicative (Applicative)
 import Control.Monad hiding (Monad)
 import qualified Control.Monad as Monad (Monad)
+import Control.Monad.Catch.Class
 import Control.Monad.Error.Class
 import Control.Monad.IO.Class
 import Control.Monad.RWS.Class
@@ -40,7 +40,8 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Foldable (foldr)
 import Data.Monoid ((<>), mempty)
 
-import Prelude hiding (Monad, foldr)
+import Prelude (Either (..), Maybe (..), ($), (.), const, either, flip, fst, id,
+                map, maybe)
 
 -- | The permutation applicative
 type Perm = PermT' Applicative
@@ -104,17 +105,24 @@ instance MonadTrans (PermT' c) where
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
 
+#ifdef LANGUAGE_DefaultSignatures
+instance MonadThrow e m => MonadThrow e (PermT m)
+#else
+instance MonadThrow e m => MonadThrow e (PermT m) where
+  throw = lift . throw
+#endif
+
 instance MonadError e m => MonadError e (PermT m) where
   throwError = lift . throwError
-  Choice a xs `catchError` h = Choice a (map (`catchB` h) xs)
+  Choice a xs `catchError` h = Choice a (map (`catchErrorB` h) xs)
 
-catchB :: MonadError e m =>
-          Branch Monad m a -> (e -> PermT m a) -> Branch Monad m a
-Ap perm m `catchB` h =
+catchErrorB :: MonadError e m =>
+               Branch Monad m a -> (e -> PermT m a) -> Branch Monad m a
+Ap perm m `catchErrorB` h =
   Bind (either h f) (liftM Right m `catchError` (return . Left))
   where
     f a = liftM ($ a) perm `catchError` h
-Bind k m `catchB` h =
+Bind k m `catchErrorB` h =
   Bind (either h k) (liftM Right m `catchError` (return . Left))
 
 instance MonadRWS r w s m => MonadRWS r w s (PermT m)
