@@ -39,8 +39,7 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Foldable (foldr)
 import Data.Monoid ((<>), mempty)
 
-import Prelude (Either (..), Maybe (..), ($), (.), const, either, flip, fst, id,
-                map, maybe)
+import Prelude (Maybe (..), ($), (.), const, flip, fst, id, map, maybe)
 
 -- | The permutation applicative
 type Perm = PermT' Applicative
