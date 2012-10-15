@@ -40,8 +40,8 @@ import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
 type Perm = PermT Applicative
 
 {- |
-The permutation action, available as either an 'Applicative' or a 'Monad',
-determined by the combinators used.
+The permutation action, available as either an 'Applicative.Applicative'
+or a 'Monad.Monad', determined by the combinators used.
 -}
 data PermT c m a = Choice (Maybe a) [Branch c m a]
 
@@ -70,11 +70,15 @@ instance Alternative (PermT c m) where
 
 instance Monad.Monad (PermT Monad m) where
   return a = Choice (return a) mempty
-  Choice Nothing ms >>= k = Choice Nothing (map (bindP k) ms)
-  Choice (Just a) ms >>= k = case k a of
-    Choice a' ms' -> Choice a' (map (bindP k) ms <> ms')
+  Choice Nothing xs >>= k = Choice Nothing (map (bindP k) xs)
+  Choice (Just a) xs >>= k = case k a of
+    Choice a' xs' -> Choice a' (map (bindP k) xs <> xs')
   (>>) = liftThen (>>)
   fail _ = Choice mzero mempty
+
+bindP :: (a -> PermT Monad m b) -> Branch Monad m a -> Branch Monad m b
+bindP k (Ap perm m) = Bind (\ a -> k . ($ a) =<< perm) m
+bindP k (Bind k' m) = Bind (k <=< k') m
 
 instance MonadPlus (PermT Monad m) where
   mzero = liftZero mzero
@@ -120,10 +124,6 @@ Bind k m `apB` a = Bind ((`ap` a) . k) m
 flipA2 :: Applicative.Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
-bindP :: (a -> PermT Monad m b) -> Branch Monad m a -> Branch Monad m b
-bindP k (Ap perm m) = Bind (\ a -> k . ($ a) =<< perm) m
-bindP k (Bind k' m) = Bind (k <=< k') m
-
 liftThen :: (Maybe a -> Maybe b -> Maybe b) ->
             PermT c m a -> PermT c m b -> PermT c m b
 liftThen thenMaybe m@(Choice m' ms) n@(Choice n' ns) =
@@ -159,7 +159,7 @@ runPermT = lower
     f (perm `Ap` m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
 
--- | A version of 'lift' without the @'Monad' m@ constraint
+-- | A version of 'lift' without the @'Monad.Monad' m@ constraint
 liftPerm :: m a -> PermT c m a
 liftPerm = Choice empty . pure . liftBranch
 
