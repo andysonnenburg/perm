@@ -180,7 +180,7 @@ liftBranch = Ap (Choice (pure id) mempty)
 
 {- |
 Lift a natural transformation from @m@ to @n@ into a natural transformation
-from @'PermT' c m@ to @'PermT' c n@.
+from @'PermT'' c m@ to @'PermT'' c n@.
 -}
 hoistPerm :: (forall a . m a -> n a) -> PermT' c m b -> PermT' c n b
 hoistPerm f (Choice a xs) = Choice a (hoistBranch f <$> xs)

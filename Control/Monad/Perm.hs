@@ -7,8 +7,8 @@ Portability: non-portable
 -}
 module Control.Monad.Perm
        ( PermT
-       , PermT'
        , runPermT
+       , PermT'
        , liftPerm
        , hoistPerm
        ) where
