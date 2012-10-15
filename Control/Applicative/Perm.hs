@@ -1,4 +1,3 @@
-{-# LANGUAGE ConstraintKinds, Rank2Types #-}
 {- |
 Copyright: Andy Sonnenburg (c) 2012
 License: BSD-style (see the file LICENSE)
