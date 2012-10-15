@@ -1,6 +1,11 @@
+{-# LANGUAGE CPP #-}
+#ifdef LANGUAGE_DataKinds
+{-# LANGUAGE DataKinds #-}
+#else
+{-# LANGUAGE EmptyDataDecls #-}
+#endif
 {-# LANGUAGE
-    DataKinds
-  , ExistentialQuantification
+    ExistentialQuantification
   , FlexibleInstances
   , GADTs
   , MultiParamTypeClasses
@@ -53,7 +58,12 @@ data Branch c m b where
   Ap :: PermT' c m (a -> b) -> m a -> Branch c m b
   Bind :: (a -> PermT m b) -> m a -> Branch Monad m b
 
+#ifdef LANGUAGE_DataKinds
 data Constraint = Applicative | Monad
+#else
+data Applicative
+data Monad
+#endif
 
 instance Functor (PermT' c m) where
   fmap f (Choice a xs) = Choice (f <$> a) (fmap f <$> xs)

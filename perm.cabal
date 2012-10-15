@@ -24,6 +24,8 @@ library
     transformers >= 0.2 && < 0.4,
     mtl >= 2.0 && < 2.2
   ghc-options: -Wall
+  if impl(ghc >= 7.6)
+    cpp-options: -DLANGUAGE_DataKinds
   other-extensions:
     ExistentialQuantification
     FlexibleInstances
