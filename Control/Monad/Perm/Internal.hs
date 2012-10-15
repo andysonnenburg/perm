@@ -32,7 +32,6 @@ import qualified Control.Applicative as Applicative (Applicative)
 import Control.Monad hiding (Monad)
 import qualified Control.Monad as Monad (Monad)
 import Control.Monad.Catch.Class
-import Control.Monad.Error.Class
 import Control.Monad.IO.Class
 import Control.Monad.RWS.Class
 import Control.Monad.Trans.Class (MonadTrans (lift))
@@ -111,19 +110,6 @@ instance MonadThrow e m => MonadThrow e (PermT m)
 instance MonadThrow e m => MonadThrow e (PermT m) where
   throw = lift . throw
 #endif
-
-instance MonadError e m => MonadError e (PermT m) where
-  throwError = lift . throwError
-  Choice a xs `catchError` h = Choice a (map (`catchErrorB` h) xs)
-
-catchErrorB :: MonadError e m =>
-               Branch Monad m a -> (e -> PermT m a) -> Branch Monad m a
-Ap perm m `catchErrorB` h =
-  Bind (either h f) (liftM Right m `catchError` (return . Left))
-  where
-    f a = liftM ($ a) perm `catchError` h
-Bind k m `catchErrorB` h =
-  Bind (either h k) (liftM Right m `catchError` (return . Left))
 
 instance MonadRWS r w s m => MonadRWS r w s (PermT m)
 
