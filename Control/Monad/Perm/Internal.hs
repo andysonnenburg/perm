@@ -35,7 +35,7 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Foldable (foldr)
 import Data.Monoid ((<>), mempty)
 
-import Prelude (Maybe (..), ($), (.), const, flip, id, map, maybe)
+import Prelude hiding (Monad, foldr)
 
 -- | The permutation applicative
 type Perm = PermT' Applicative
@@ -96,6 +96,16 @@ instance MonadIO m => MonadIO (PermT m) where
 
 instance MonadError e m => MonadError e (PermT m) where
   throwError = lift . throwError
+  Choice a xs `catchError` h = Choice a (map (`catchB` h) xs)
+
+catchB :: MonadError e m =>
+          Branch Monad m a -> (e -> PermT m a) -> Branch Monad m a
+Ap perm m `catchB` h =
+  Bind (either h f) (liftM Right m `catchError` (return . Left))
+  where
+    f a = liftM ($ a) perm `catchError` h
+Bind k m `catchB` h =
+  Bind (either h k) (liftM Right m `catchError` (return . Left))
 
 instance MonadRWS r w s m => MonadRWS r w s (PermT m)
 
@@ -115,12 +125,17 @@ instance MonadState s m => MonadState s (PermT m) where
 instance MonadWriter w m => MonadWriter w (PermT m) where
   tell = lift . tell
   listen (Choice a xs) = Choice (flip (,) mempty <$> a) (map listenBranch xs)
+  pass (Choice a xs) = Choice (fst <$> a) (map passBranch xs)
 
 listenBranch :: MonadWriter w m => Branch Monad m a -> Branch Monad m (a, w)
 listenBranch (Ap perm m) =
   liftM (\ (f, y) (a, x) -> (f a, x <> y)) (listen perm) `Ap` listen m
 listenBranch (Bind k m) =
   Bind (\ (a, w) -> liftM ((<> w) <$>) $ listen $ k a) (listen m)
+
+passBranch :: MonadWriter w m => Branch Monad m (a, w -> w) -> Branch Monad m a
+passBranch (Ap perm m) = Bind (\ a -> pass $ liftM ($ a) perm) m
+passBranch (Bind k m) = Bind (pass . k) m
 
 apP :: PermT' c m (a -> b) -> Branch c m a -> Branch c m b
 f `apP` Ap perm m = (f .@ perm) `Ap` m
