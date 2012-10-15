@@ -27,6 +27,8 @@ library
   ghc-options: -Wall
   if impl(ghc >= 7.6)
     cpp-options: -DLANGUAGE_DataKinds
+  if impl(ghc >= 7.2)
+    cpp-options: -DLANGUAGE_DefaultSignatures
   other-extensions:
     FlexibleInstances
     GADTs
