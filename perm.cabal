@@ -7,8 +7,7 @@ description:
   Doaitse Swierstra, /Haskell Workshop 2001/.  The implementation given here
   does not include explicit optional actions, and instead implements
   'Control.Applicative.Alternative' and 'Control.Monad.MonadPlus'.
-  @m 'Control.Applicative.<|>' 'Control.Applicative.pure' a@ should be used where
-  @'addOpt' a m@ would be used.
+  @m '<|>' 'pure' a@ should be used where @'addOpt' a m@ would be used.
 license:       BSD3
 license-file:  LICENSE
 author:        Andy Sonnenburg
