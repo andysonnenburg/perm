@@ -36,4 +36,5 @@ library
     GADTs
     MultiParamTypeClasses
     Rank2Types
+    TypeSynonymInstances
     UndecidableInstances

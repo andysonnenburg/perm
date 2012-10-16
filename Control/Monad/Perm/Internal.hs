@@ -9,6 +9,7 @@
   , GADTs
   , MultiParamTypeClasses
   , Rank2Types
+  , TypeSynonymInstances
   , UndecidableInstances #-}
 {- |
 Copyright: Andy Sonnenburg (c) 2012
