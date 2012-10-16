@@ -33,7 +33,8 @@ import Control.Monad hiding (Monad)
 import qualified Control.Monad as Monad (Monad)
 import Control.Monad.Catch.Class
 import Control.Monad.IO.Class
-import Control.Monad.RWS.Class
+import Control.Monad.Reader.Class
+import Control.Monad.State.Class
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
@@ -77,6 +78,20 @@ instance Applicative.Applicative (PermT' c m) where
     Choice (f' <*> a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
   (*>) = liftThen (*>)
 
+apP :: PermT' c m (a -> b) -> Branch c m a -> Branch c m b
+f `apP` Ap perm m = (f .@ perm) `Ap` m
+f `apP` Bind k m = Bind ((f `ap`) . k) m
+
+(.@) :: Applicative.Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
+(.@) = liftA2 (.)
+
+apB :: Branch c m (a -> b) -> PermT' c m a -> Branch c m b
+Ap perm m `apB` a = flipA2 perm a `Ap` m
+Bind k m `apB` a = Bind ((`ap` a) . k) m
+
+flipA2 :: Applicative.Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
+flipA2 = liftA2 flip
+
 instance Alternative (PermT' c m) where
   empty = liftZero empty
   (<|>) = plus
@@ -103,15 +118,6 @@ instance MonadTrans (PermT' c) where
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
 
-#ifdef LANGUAGE_DefaultSignatures
-instance MonadThrow e m => MonadThrow e (PermT m)
-#else
-instance MonadThrow e m => MonadThrow e (PermT m) where
-  throw = lift . throw
-#endif
-
-instance MonadRWS r w s m => MonadRWS r w s (PermT m)
-
 instance MonadReader r m => MonadReader r (PermT m) where
   ask = lift ask
   local f (Choice a xs) = Choice a (map (localBranch f) xs)
@@ -125,34 +131,12 @@ instance MonadState s m => MonadState s (PermT m) where
   get = lift get
   put = lift . put
 
-instance MonadWriter w m => MonadWriter w (PermT m) where
-  tell = lift . tell
-  listen (Choice a xs) = Choice (flip (,) mempty <$> a) (map listenBranch xs)
-  pass (Choice a xs) = Choice (fst <$> a) (map passBranch xs)
-
-listenBranch :: MonadWriter w m => Branch Monad m a -> Branch Monad m (a, w)
-listenBranch (Ap perm m) =
-  liftM (\ (f, y) (a, x) -> (f a, x <> y)) (listen perm) `Ap` listen m
-listenBranch (Bind k m) =
-  Bind (\ (a, w) -> liftM ((<> w) <$>) $ listen $ k a) (listen m)
-
-passBranch :: MonadWriter w m => Branch Monad m (a, w -> w) -> Branch Monad m a
-passBranch (Ap perm m) = Bind (\ a -> pass $ liftM ($ a) perm) m
-passBranch (Bind k m) = Bind (pass . k) m
-
-apP :: PermT' c m (a -> b) -> Branch c m a -> Branch c m b
-f `apP` Ap perm m = (f .@ perm) `Ap` m
-f `apP` Bind k m = Bind ((f `ap`) . k) m
-
-(.@) :: Applicative.Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
-(.@) = liftA2 (.)
-
-apB :: Branch c m (a -> b) -> PermT' c m a -> Branch c m b
-Ap perm m `apB` a = flipA2 perm a `Ap` m
-Bind k m `apB` a = Bind ((`ap` a) . k) m
-
-flipA2 :: Applicative.Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
-flipA2 = liftA2 flip
+#ifdef LANGUAGE_DefaultSignatures
+instance MonadThrow e m => MonadThrow e (PermT m)
+#else
+instance MonadThrow e m => MonadThrow e (PermT m) where
+  throw = lift . throw
+#endif
 
 liftThen :: (Maybe a -> Maybe b -> Maybe b) ->
             PermT' c m a -> PermT' c m b -> PermT' c m b
