@@ -32,12 +32,11 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 #if MIN_VERSION_mtl(2, 1, 0)
 import Control.Monad.Reader.Class (MonadReader (ask, local, reader))
 import Control.Monad.State.Class (MonadState (get, put, state))
-import Control.Monad.Trans.Class (MonadTrans (lift))
 #else
 import Control.Monad.Reader.Class (MonadReader (ask, local))
 import Control.Monad.State.Class (MonadState (get, put))
-import Control.Monad.Trans.Class (MonadTrans (lift))
 #endif
+import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
 #if MIN_VERSION_base(4, 5, 0)
