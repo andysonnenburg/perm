@@ -110,7 +110,7 @@ instance Monad m => Monad (PermT m) where
   Choice (Just a) xs >>= k = case k a of
     Choice a' xs' -> Choice a' (map (bindP k) xs <> xs')
   (>>) = liftThen (>>)
-  fail _ = Choice mzero mempty
+  fail s = Choice (fail s) mempty
 
 bindP :: Monad m => (a -> PermT m b) -> Branch m a -> Branch m b
 bindP k (Ap perm m) = Bind (\ a -> k . ($ a) =<< perm) m
