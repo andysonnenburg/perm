@@ -6,8 +6,8 @@ description:
   Based on \"Parsing Permutation Phrases\", by Arthur Baars, Andres Loeh and S.
   Doaitse Swierstra, /Haskell Workshop 2001/.  The implementation given here
   does not include explicit optional actions, and instead implements
-  'Alternative' and 'MonadPlus'.  @m '<|>' 'pure' a@ should be used where
-  @'addOpt' a m@ would be used.
+  'Alternative' and 'MonadPlus'.  @m '<*>' ('lift' n '<|>' 'pure' a)@ should
+  be used where @'addOpt' m a n@ would be used.
 license:       BSD3
 license-file:  LICENSE
 author:        Andy Sonnenburg
