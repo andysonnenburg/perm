@@ -194,8 +194,8 @@ liftBranch :: m a -> Branch m a
 liftBranch = Ap (Choice (pure id) mempty)
 
 {- |
-Lift a natural transformation from @m@ to @n@ into a natural transformation
-from @'PermT'' c m@ to @'PermT'' c n@.
+Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
+@'PermT' m@ to @'PermT' n@.
 -}
 hoistPerm :: Monad n => (forall a . m a -> n a) -> PermT m b -> PermT n b
 hoistPerm f (Choice a xs) = Choice a (hoistBranch f <$> xs)
