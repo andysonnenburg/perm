@@ -23,23 +23,32 @@ module Control.Monad.Perm.Internal
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Catch.Class
-import Control.Monad.IO.Class
-import Control.Monad.Reader.Class
-import Control.Monad.State.Class
+#if LANGUAGE_DefaultSignatures
+import Control.Monad.Catch.Class (MonadThrow)
+#else
+import Control.Monad.Catch.Class (MonadThrow (throw))
+#endif
+import Control.Monad.IO.Class (MonadIO (liftIO))
+#if MIN_VERSION_mtl(2, 1, 0)
+import Control.Monad.Reader.Class (MonadReader (ask, local, reader))
+import Control.Monad.State.Class (MonadState (get, put, state))
 import Control.Monad.Trans.Class (MonadTrans (lift))
+#else
+import Control.Monad.Reader.Class (MonadReader (ask, local))
+import Control.Monad.State.Class (MonadState (get, put))
+import Control.Monad.Trans.Class (MonadTrans (lift))
+#endif
 
 import Data.Foldable (foldr)
-import Data.Monoid (mempty)
-#if defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ >= 704
-import Data.Monoid ((<>))
+#if MIN_VERSION_base(4, 5, 0)
+import Data.Monoid ((<>), mempty)
 #else
-import Data.Monoid (Monoid, mappend)
+import Data.Monoid (Monoid, mappend, mempty)
 #endif
 
 import Prelude (Maybe (..), ($), (.), const, flip, fst, id, map, maybe)
 
-#if !defined(__GLASGOW_HASKELL__) || __GLASGOW_HASKELL__ < 704
+#if !MIN_VERSION_base(4, 5, 0)
 (<>) :: Monoid m => m -> m -> m
 (<>) = mappend
 {-# INLINE (<>) #-}
@@ -57,16 +66,25 @@ data Branch m b where
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (fmap f <$> xs)
+#if MIN_VERSION_base(4, 2, 0)
+  a <$ Choice b xs = Choice (a <$ b) (fmap (a <$) xs)
+#endif
 
 instance Functor (Branch m) where
   fmap f (Ap perm m) = Ap (fmap (f .) perm) m
   fmap f (Bind k m) = Bind (fmap f . k) m
+#if MIN_VERSION_base(4, 2, 0)
+  a <$ Ap perm m = Ap (const a <$ perm) m
+  a <$ Bind k m = Bind ((a <$) . k) m
+#endif
 
 instance Applicative (PermT m) where
   pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
     Choice (f' <*> a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
+#if MIN_VERSION_base(4, 2, 0)
   (*>) = liftThen (*>)
+#endif
 
 apP :: PermT m (a -> b) -> Branch m a -> Branch m b
 f `apP` Ap perm m = (f .@ perm) `Ap` m
@@ -111,6 +129,9 @@ instance MonadIO m => MonadIO (PermT m) where
 instance MonadReader r m => MonadReader r (PermT m) where
   ask = lift ask
   local f (Choice a xs) = Choice a (map (localBranch f) xs)
+#if MIN_VERSION_mtl(2, 1, 0)
+  reader = lift . reader
+#endif
 
 localBranch :: MonadReader r m => (r -> r) -> Branch m a -> Branch m a
 localBranch f (Ap perm m) = Ap (local f perm) (local f m)
@@ -119,6 +140,9 @@ localBranch f (Bind k m) = Bind (local f . k) (local f m)
 instance MonadState s m => MonadState s (PermT m) where
   get = lift get
   put = lift . put
+#if MIN_VERSION_mtl(2, 1, 0)
+  state = lift . state
+#endif
 
 #ifdef LANGUAGE_DefaultSignatures
 instance MonadThrow e m => MonadThrow e (PermT m)
