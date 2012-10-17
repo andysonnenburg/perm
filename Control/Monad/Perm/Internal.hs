@@ -39,9 +39,20 @@ import Control.Monad.State.Class
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (foldr)
-import Data.Monoid ((<>), mempty)
+import Data.Monoid (mempty)
+#if defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ >= 704
+import Data.Monoid ((<>))
+#else
+import Data.Monoid (Monoid, mappend)
+#endif
 
 import Prelude (Maybe (..), ($), (.), const, flip, fst, id, map, maybe)
+
+#if !defined(__GLASGOW_HASKELL__) || __GLASGOW_HASKELL__ < 704
+(<>) :: Monoid m => m -> m -> m
+(<>) = mappend
+{-# INLINE (<>) #-}
+#endif
 
 -- | The permutation applicative
 type Perm = PermT' Applicative
