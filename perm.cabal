@@ -34,10 +34,6 @@ library
     mtl >= 2.0 && < 2.2,
     catch-fd >= 0.2 && < 0.4
   ghc-options: -Wall
-  if impl(ghc >= 7.6)
-    cpp-options: -DLANGUAGE_DataKinds
-  else
-    other-extensions: EmptyDataDecls
   if impl(ghc >= 7.2)
     cpp-options: -DLANGUAGE_DefaultSignatures
   other-extensions:
@@ -46,5 +42,4 @@ library
     GADTs
     MultiParamTypeClasses
     Rank2Types
-    TypeSynonymInstances
     UndecidableInstances
