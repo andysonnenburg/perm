@@ -9,10 +9,8 @@ module Control.Monad.Perm
        ( PermT
        , runPermT
        , liftPerm
-       , hoistPerm
        ) where
 
 import Control.Monad.Perm.Internal (PermT,
                                     liftPerm,
-                                    hoistPerm,
                                     runPermT)
