@@ -8,11 +8,11 @@ Portability: non-portable
 module Control.Applicative.Perm
        ( Perm
        , runPerm
-       , liftP
+       , liftPerm
        , hoistPerm
        ) where
 
 import Control.Monad.Perm.Internal (Perm,
-                                    liftP,
+                                    liftPerm,
                                     hoistPerm,
                                     runPerm)
