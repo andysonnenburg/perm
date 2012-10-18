@@ -184,6 +184,7 @@ runPerm :: Alternative m => Perm m a -> m a
 runPerm = lower
   where
     lower (Choice a xs) = foldr ((<|>) . f) (maybe empty pure a) xs
+    f (Ap Monad perm m) = flip ($) `liftM` m `ap` runPerm perm
     f (Ap _ perm m) = m <**> runPerm perm
     f (Bind k m) = m >>= runPerm . k
 
