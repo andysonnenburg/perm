@@ -38,7 +38,19 @@ import Control.Monad.State.Class (MonadState (get, put))
 #endif
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
+#if MIN_VERSION_base(4, 5, 0)
+import Data.Monoid (Monoid (mappend, mempty), (<>))
+#else
+import Data.Monoid (Monoid (mappend, mempty))
+#endif
+
 import Prelude (($), (.), const, flip, fst, id, map)
+
+#if !MIN_VERSION_base(4, 5, 0)
+(<>) :: Monoid m => m -> m -> m
+(<>) = mappend
+{-# INLINE (<>) #-}
+#endif
 
 -- | The permutation applicative
 type Perm = PermT
@@ -71,9 +83,6 @@ orB = Plus Alternative
 mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
 mplusB = Plus MonadPlus
 
-plusB :: Branches m a -> Branches m a -> Branches m a
-plusB = Plus Unit
-
 sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
 sumB f zero plus = go
   where
@@ -82,6 +91,10 @@ sumB f zero plus = go
     go (Plus Unit m n) = go m `plus` go n
     go (Branch x) = f x
     go Nil = zero
+
+instance Monoid (Branches m a) where
+  mempty = Nil
+  mappend = Plus Unit
 
 instance Functor (Branches m) where
   fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
@@ -145,12 +158,12 @@ instance Functor (Branch m) where
 #endif
 
 instance Applicative m => Applicative (PermT m) where
-  pure a = Choice (pure a) Nil
+  pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
-    Choice (f' <*> a') (mapB (`apB` a) fs `plusB` mapB (f `apP`) as)
+    Choice (f' <*> a') (mapB (`apB` a) fs <> mapB (f `apP`) as)
 #if MIN_VERSION_base(4, 2, 0)
   m@(Choice m' ms) *> n@(Choice n' ns) =
-    Choice (m' *> n') (mapB (`thenBA` n) ms `plusB` mapB (m `thenPA`) ns)
+    Choice (m' *> n') (mapB (`thenBA` n) ms <> mapB (m `thenPA`) ns)
 #endif
 
 apP :: Applicative m => PermT m (a -> b) -> Branch m a -> Branch m b
@@ -183,13 +196,13 @@ instance Alternative m => Alternative (PermT m) where
   Choice (Zero _) xs <|> Choice b ys = Choice b (xs `orB` ys)
 
 instance Monad m => Monad (PermT m) where
-  return a = Choice (return a) Nil
+  return a = Choice (return a) mempty
   Choice (Zero dict) xs >>= k = Choice (Zero dict) (mapB (bindP k) xs)
   Choice (Return _ a) xs >>= k = case k a of
-    Choice a' xs' -> Choice a' (mapB (bindP k) xs `plusB` xs')
+    Choice a' xs' -> Choice a' (mapB (bindP k) xs <> xs')
   m@(Choice m' ms) >> n@(Choice n' ns) =
-    Choice (m' >> n') (mapB (`thenBM` n) ms `plusB` mapB (m `thenPM`) ns)
-  fail s = Choice (fail s) Nil
+    Choice (m' >> n') (mapB (`thenBM` n) ms <> mapB (m `thenPM`) ns)
+  fail s = Choice (fail s) mempty
 
 bindP :: Monad m => (a -> PermT m b) -> Branch m a -> Branch m b
 bindP k (Ap _ perm m) = Bind (\ a -> k . ($ a) =<< perm) m
@@ -209,7 +222,7 @@ instance MonadPlus m => MonadPlus (PermT m) where
   Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
 
 instance MonadTrans PermT where
-  lift = Choice (Zero Unit) . Branch . Ap Monad (Choice (return id) Nil)
+  lift = Choice (Zero Unit) . Branch . Ap Monad (Choice (return id) mempty)
 
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
@@ -240,7 +253,7 @@ instance MonadThrow e m => MonadThrow e (PermT m) where
 #endif
 
 liftZero :: Option m a -> PermT m a
-liftZero zeroOption = Choice zeroOption Nil
+liftZero zeroOption = Choice zeroOption mempty
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 runPerm :: Alternative m => Perm m a -> m a
@@ -265,7 +278,7 @@ liftPerm :: Applicative m => m a -> PermT m a
 liftPerm = Choice (Zero Unit) . Branch . liftBranch
 
 liftBranch :: Applicative m => m a -> Branch m a
-liftBranch = Ap Applicative (Choice (pure id) Nil)
+liftBranch = Ap Applicative (Choice (pure id) mempty)
 
 {- |
 Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
