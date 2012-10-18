@@ -45,7 +45,7 @@ import Data.Monoid ((<>), mempty)
 import Data.Monoid (Monoid, mappend, mempty)
 #endif
 
-import Prelude (Maybe (..), ($), (.), const, flip, fst, id, map, maybe)
+import Prelude (($), (.), const, flip, fst, id, map)
 
 #if !MIN_VERSION_base(4, 5, 0)
 (<>) :: Monoid m => m -> m -> m
@@ -57,16 +57,51 @@ import Prelude (Maybe (..), ($), (.), const, flip, fst, id, map, maybe)
 type Perm = PermT
 
 -- | The permutation monad
-data PermT m a = Choice (Maybe a) [Branch m a]
+data PermT m a = Choice (Maybe m a) [Branch m a]
 
 data Branch m b where
   Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
   Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
 
+data Maybe m a
+  = Nothing
+  | Just (Dict m) a
+
+maybe :: m a -> Maybe m a -> m a
+maybe n Nothing = n
+maybe _ (Just Applicative a) = pure a
+maybe _ (Just Monad a) = return a
+
+instance Functor (Maybe m) where
+  fmap _ Nothing = Nothing
+  fmap f (Just dict a) = Just dict (f a)
+
+instance Applicative m => Applicative (Maybe m) where
+  pure = Just Applicative
+  Just _ f <*> a = fmap f a
+  Nothing <*> _ = Nothing
+
+instance Applicative m => Alternative (Maybe m) where
+  empty = Nothing
+  Nothing <|> r = r
+  l <|> _ = l
+
+instance Monad m => Monad (Maybe m) where
+  return = Just Monad
+  Just _ a >>= k = k a
+  Nothing >>= _ = Nothing
+  Just _ _ >> k = k
+  Nothing >> _ = Nothing
+  fail _ = Nothing
+
+instance Monad m => MonadPlus (Maybe m) where
+  mzero = Nothing
+  Nothing `mplus` r = r
+  l `mplus` _ = l
+
 data Dict m where
   Applicative :: Applicative m => Dict m
   Monad :: Monad m => Dict m
-  Unit :: Dict m
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (fmap f <$> xs)
@@ -122,7 +157,7 @@ instance Applicative m => Alternative (PermT m) where
 instance Monad m => Monad (PermT m) where
   return a = Choice (return a) mempty
   Choice Nothing xs >>= k = Choice Nothing (map (bindP k) xs)
-  Choice (Just a) xs >>= k = case k a of
+  Choice (Just _ a) xs >>= k = case k a of
     Choice a' xs' -> Choice a' (map (bindP k) xs <> xs')
   m@(Choice m' ms) >> n@(Choice n' ns) =
     Choice (m' >> n') (map (`thenBM` n) ms <> map (m `thenPM`) ns)
@@ -145,7 +180,7 @@ instance Monad m => MonadPlus (PermT m) where
   mplus = plus
 
 instance MonadTrans PermT where
-  lift = Choice empty . pure . Ap Monad (Choice (pure id) mempty)
+  lift = Choice mzero . pure . Ap Monad (Choice (return id) mempty)
 
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
@@ -175,18 +210,18 @@ instance MonadThrow e m => MonadThrow e (PermT m) where
   throw = lift . throw
 #endif
 
-liftZero :: Maybe a -> PermT m a
+liftZero :: Maybe m a -> PermT m a
 liftZero zeroMaybe = Choice zeroMaybe mempty
 
 plus :: PermT m a -> PermT m a -> PermT m a
-m@(Choice (Just _) _) `plus` _ = m
+m@(Choice (Just _ _) _) `plus` _ = m
 Choice Nothing xs `plus` Choice b ys = Choice b (xs <> ys)
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 runPerm :: Alternative m => Perm m a -> m a
 runPerm = lower
   where
-    lower (Choice a xs) = foldr ((<|>) . f) (maybe empty pure a) xs
+    lower (Choice a xs) = foldr ((<|>) . f) (maybe empty a) xs
     f (Ap Monad perm m) = flip ($) `liftM` m `ap` runPerm perm
     f (Ap _ perm m) = m <**> runPerm perm
     f (Bind k m) = m >>= runPerm . k
@@ -195,24 +230,28 @@ runPerm = lower
 runPermT :: MonadPlus m => PermT m a -> m a
 runPermT = lower
   where
-    lower (Choice a xs) = foldr (mplus . f) (maybe mzero return a) xs
+    lower (Choice a xs) = foldr (mplus . f) (maybe mzero a) xs
     f (Ap Applicative perm m) = m <**> runPermT perm
     f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
 
 -- | A version of 'lift' that can be used with just an 'Applicative' for m.
-liftPerm :: m a -> PermT m a
+liftPerm :: Applicative m => m a -> PermT m a
 liftPerm = Choice empty . pure . liftBranch
 
-liftBranch :: m a -> Branch m a
-liftBranch = Ap Unit (Choice (pure id) mempty)
+liftBranch :: Applicative m => m a -> Branch m a
+liftBranch = Ap Applicative (Choice (pure id) mempty)
 
 {- |
 Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
 @'PermT' m@ to @'PermT' n@.
 -}
 hoistPerm :: Monad n => (forall a . m a -> n a) -> PermT m b -> PermT n b
-hoistPerm f (Choice a xs) = Choice a (hoistBranch f <$> xs)
+hoistPerm f (Choice a xs) = Choice (hoistMaybe a) (hoistBranch f <$> xs)
+
+hoistMaybe :: Monad n => Maybe m a -> Maybe n a
+hoistMaybe Nothing = Nothing
+hoistMaybe (Just _ a) = Just Monad a
 
 hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
 hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
