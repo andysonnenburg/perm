@@ -106,7 +106,7 @@ flipA2 = liftA2 flip
 
 thenPA :: PermT m a -> Branch m b -> Branch m b
 m `thenPA` Ap dict perm n = Ap dict (m *> perm) n
-m `thenPA` Bind k m' = Bind ((m *>) . k) m'
+m `thenPA` Bind k n = Bind ((m *>) . k) n
 
 thenBA :: Branch m a -> PermT m b -> Branch m b
 Ap dict perm m `thenBA` n = Ap dict (perm *> fmap const n) m
