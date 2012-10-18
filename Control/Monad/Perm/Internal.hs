@@ -235,7 +235,7 @@ runPermT = lower
     f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
 
--- | A version of 'lift' that can be used with just an 'Applicative' for m.
+-- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
 liftPerm :: Applicative m => m a -> PermT m a
 liftPerm = Choice empty . pure . liftBranch
 
