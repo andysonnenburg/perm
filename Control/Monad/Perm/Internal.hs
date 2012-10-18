@@ -66,6 +66,7 @@ data Branch m b where
 data Dict m where
   Applicative :: Applicative m => Dict m
   Monad :: Monad m => Dict m
+  Unit :: Dict m
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (fmap f <$> xs)
@@ -104,6 +105,7 @@ Bind k m `apB` a = Bind ((`ap` a) . k) m
 flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
+#if MIN_VERSION_base(4, 2, 0)
 thenPA :: Applicative m => PermT m a -> Branch m b -> Branch m b
 m `thenPA` Ap _ perm n = Ap Applicative (m *> perm) n
 m `thenPA` Bind k n = Bind ((m *>) . k) n
@@ -111,6 +113,7 @@ m `thenPA` Bind k n = Bind ((m *>) . k) n
 thenBA :: Applicative m => Branch m a -> PermT m b -> Branch m b
 Ap _ perm m `thenBA` n = Ap Applicative (perm *> fmap const n) m
 Bind k m `thenBA` n = Bind ((*> n) . k) m
+#endif
 
 instance Applicative m => Alternative (PermT m) where
   empty = liftZero empty
@@ -198,11 +201,11 @@ runPermT = lower
     f (Bind k m) = m >>= runPermT . k
 
 -- | A version of 'lift' that can be used with just an 'Applicative' for m.
-liftPerm :: Applicative m => m a -> PermT m a
+liftPerm :: m a -> PermT m a
 liftPerm = Choice empty . pure . liftBranch
 
-liftBranch :: Applicative m => m a -> Branch m a
-liftBranch = Ap Applicative (Choice (pure id) mempty)
+liftBranch :: m a -> Branch m a
+liftBranch = Ap Unit (Choice (pure id) mempty)
 
 {- |
 Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
