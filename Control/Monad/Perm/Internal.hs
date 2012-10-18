@@ -200,7 +200,7 @@ runPermT = lower
     f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
 
--- | A version of 'lift' without the @'Monad.Monad' m@ constraint
+-- | A version of 'lift' that can be used with just an 'Applicative' for m.
 liftP :: Applicative m => m a -> PermT m a
 liftP = Choice empty . pure . liftB
 
