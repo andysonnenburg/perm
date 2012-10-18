@@ -106,11 +106,11 @@ flipA2 = liftA2 flip
 
 thenPA :: PermT m a -> Branch m b -> Branch m b
 m `thenPA` Ap dict perm n = Ap dict (m *> perm) n
-m `thenPA` Bind k m' = Bind ((m >>) . k) m'
+m `thenPA` Bind k m' = Bind ((m *>) . k) m'
 
 thenBA :: Branch m a -> PermT m b -> Branch m b
 Ap dict perm m `thenBA` n = Ap dict (perm *> fmap const n) m
-Bind k m `thenBA` n = Bind ((>> n) . k) m
+Bind k m `thenBA` n = Bind ((*> n) . k) m
 
 instance Applicative m => Alternative (PermT m) where
   empty = liftZero empty
@@ -131,7 +131,7 @@ bindP k (Bind k' m) = Bind (k <=< k') m
 
 thenPM :: Monad m => PermT m a -> Branch m b -> Branch m b
 m `thenPM` Ap dict perm n = Ap dict (m >> perm) n
-m `thenPM` Bind k m' = Bind ((m >>) . k) m'
+m `thenPM` Bind k n = Bind ((m >>) . k) n
 
 thenBM :: Monad m => Branch m a -> PermT m b -> Branch m b
 Ap dict perm m `thenBM` n = Ap dict (perm >> fmap const n) m
