@@ -18,6 +18,7 @@ module Control.Monad.Perm.Internal
        , PermT
        , runPermT
        , liftPerm
+       , hoistPerm
        ) where
 
 import Control.Applicative
@@ -49,27 +50,20 @@ data Branch m b where
   Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
   Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
 
-data Branches m a where
-  Plus :: PlusDict m -> Branches m a -> Branches m a -> Branches m a
-  Branch :: Branch m a -> Branches m a
-  Nil :: Branches m a
+data Branches m a
+  = Plus (PlusDict m) (Branches m a) (Branches m a)
+  | Branch (Branch m a)
+  | Nil
 
 data PlusDict m where
   Alternative :: Alternative m => PlusDict m
   MonadPlus :: MonadPlus m => PlusDict m
+  Unit :: PlusDict m
 
 mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
 mapB f (Plus dict m n) = Plus dict (mapB f m) (mapB f n)
 mapB f (Branch x) = Branch (f x)
 mapB _ Nil = Nil
-
-foldrB :: (Branch m a -> m a) -> m a -> Branches m a -> m a
-foldrB f a = go
-  where
-    go (Plus Alternative m n) = go m <|> go n
-    go (Plus MonadPlus m n) = go m `mplus` go n
-    go (Branch x) = f x
-    go Nil = a
 
 orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
 orB = Plus Alternative
@@ -77,45 +71,59 @@ orB = Plus Alternative
 mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
 mplusB = Plus MonadPlus
 
+plusB :: Branches m a -> Branches m a -> Branches m a
+plusB = Plus Unit
+
+sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
+sumB f zero plus = go
+  where
+    go (Plus Alternative m n) = go m <|> go n
+    go (Plus MonadPlus m n) = go m `mplus` go n
+    go (Plus Unit m n) = go m `plus` go n
+    go (Branch x) = f x
+    go Nil = zero
+
 instance Functor (Branches m) where
   fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
   fmap f (Branch a) = Branch (fmap f a)
   fmap _ Nil = Nil
 
 data Option m a
-  = Zero
+  = Zero (PlusDict m)
   | Return (Dict m) a
 
 option :: m a -> Option m a -> m a
-option n Zero = n
+option _ (Zero Alternative) = empty
+option _ (Zero MonadPlus) = mzero
+option n (Zero Unit) = n
 option _ (Return Applicative a) = pure a
 option _ (Return Monad a) = return a
 
 instance Functor (Option m) where
-  fmap _ Zero = Zero
+  fmap _ (Zero dict) = Zero dict
   fmap f (Return dict a) = Return dict (f a)
 
 instance Applicative m => Applicative (Option m) where
   pure = Return Applicative
   Return _ f <*> a = fmap f a
-  Zero <*> _ = Zero
+  Zero dict <*> _ = Zero dict
 
-instance Applicative m => Alternative (Option m) where
-  empty = Zero
-  Zero <|> r = r
+instance Alternative m => Alternative (Option m) where
+  empty = Zero Alternative
+  Zero _ <|> r = r
   l <|> _ = l
 
 instance Monad m => Monad (Option m) where
   return = Return Monad
   Return _ a >>= k = k a
-  Zero >>= _ = Zero
+  Zero dict >>= _ = Zero dict
   Return _ _ >> k = k
-  Zero >> _ = Zero
-  fail _ = Zero
+  Zero dict >> _ = Zero dict
+  fail _ = Zero Unit
 
-instance Monad m => MonadPlus (Option m) where
-  mzero = Zero
-  Zero `mplus` r = r
+instance MonadPlus m => MonadPlus (Option m) where
+  mzero = Zero MonadPlus
+  Zero _ `mplus` r = r
   l `mplus` _ = l
 
 data Dict m where
@@ -136,23 +144,23 @@ instance Functor (Branch m) where
   a <$ Bind k m = Bind ((a <$) . k) m
 #endif
 
-instance Alternative m => Applicative (PermT m) where
+instance Applicative m => Applicative (PermT m) where
   pure a = Choice (pure a) Nil
   f@(Choice f' fs) <*> a@(Choice a' as) =
-    Choice (f' <*> a') (mapB (`apB` a) fs `orB` mapB (f `apP`) as)
+    Choice (f' <*> a') (mapB (`apB` a) fs `plusB` mapB (f `apP`) as)
 #if MIN_VERSION_base(4, 2, 0)
   m@(Choice m' ms) *> n@(Choice n' ns) =
-    Choice (m' *> n') (mapB (`thenBA` n) ms `orB` mapB (m `thenPA`) ns)
+    Choice (m' *> n') (mapB (`thenBA` n) ms `plusB` mapB (m `thenPA`) ns)
 #endif
 
-apP :: Alternative m => PermT m (a -> b) -> Branch m a -> Branch m b
+apP :: Applicative m => PermT m (a -> b) -> Branch m a -> Branch m b
 f `apP` Ap _ perm m = Ap Applicative (f .@ perm) m
 f `apP` Bind k m = Bind ((f <*>) . k) m
 
 (.@) :: Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
 (.@) = liftA2 (.)
 
-apB :: Alternative m => Branch m (a -> b) -> PermT m a -> Branch m b
+apB :: Applicative m => Branch m (a -> b) -> PermT m a -> Branch m b
 Ap _ perm m `apB` a = Ap Applicative (flipA2 perm a) m
 Bind k m `apB` a = Bind ((<*> a) . k) m
 
@@ -160,11 +168,11 @@ flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
 #if MIN_VERSION_base(4, 2, 0)
-thenPA :: Alternative m => PermT m a -> Branch m b -> Branch m b
+thenPA :: Applicative m => PermT m a -> Branch m b -> Branch m b
 m `thenPA` Ap _ perm n = Ap Applicative (m *> perm) n
 m `thenPA` Bind k n = Bind ((m *>) . k) n
 
-thenBA :: Alternative m => Branch m a -> PermT m b -> Branch m b
+thenBA :: Applicative m => Branch m a -> PermT m b -> Branch m b
 Ap _ perm m `thenBA` n = Ap Applicative (perm *> fmap const n) m
 Bind k m `thenBA` n = Bind ((*> n) . k) m
 #endif
@@ -172,53 +180,52 @@ Bind k m `thenBA` n = Bind ((*> n) . k) m
 instance Alternative m => Alternative (PermT m) where
   empty = liftZero empty
   m@(Choice (Return _ _) _) <|> _ = m
-  Choice Zero xs <|> Choice b ys = Choice b (xs `orB` ys)
+  Choice (Zero _) xs <|> Choice b ys = Choice b (xs `orB` ys)
 
-instance MonadPlus m => Monad (PermT m) where
+instance Monad m => Monad (PermT m) where
   return a = Choice (return a) Nil
-  Choice Zero xs >>= k = Choice Zero (mapB (bindP k) xs)
+  Choice (Zero dict) xs >>= k = Choice (Zero dict) (mapB (bindP k) xs)
   Choice (Return _ a) xs >>= k = case k a of
-    Choice a' xs' -> Choice a' (mapB (bindP k) xs `mplusB` xs')
+    Choice a' xs' -> Choice a' (mapB (bindP k) xs `plusB` xs')
   m@(Choice m' ms) >> n@(Choice n' ns) =
-    Choice (m' >> n') (mapB (`thenBM` n) ms `mplusB` mapB (m `thenPM`) ns)
+    Choice (m' >> n') (mapB (`thenBM` n) ms `plusB` mapB (m `thenPM`) ns)
   fail s = Choice (fail s) Nil
 
-bindP :: MonadPlus m => (a -> PermT m b) -> Branch m a -> Branch m b
+bindP :: Monad m => (a -> PermT m b) -> Branch m a -> Branch m b
 bindP k (Ap _ perm m) = Bind (\ a -> k . ($ a) =<< perm) m
 bindP k (Bind k' m) = Bind (k <=< k') m
 
-thenPM :: MonadPlus m => PermT m a -> Branch m b -> Branch m b
+thenPM :: Monad m => PermT m a -> Branch m b -> Branch m b
 m `thenPM` Ap _ perm n = Ap Monad (m >> perm) n
 m `thenPM` Bind k n = Bind ((m >>) . k) n
 
-thenBM :: MonadPlus m => Branch m a -> PermT m b -> Branch m b
+thenBM :: Monad m => Branch m a -> PermT m b -> Branch m b
 Ap _ perm m `thenBM` n = Ap Monad (perm >> fmap const n) m
 Bind k m `thenBM` n = Bind ((>> n) . k) m
 
 instance MonadPlus m => MonadPlus (PermT m) where
   mzero = liftZero mzero
   m@(Choice (Return _ _) _) `mplus` _ = m
-  Choice Zero xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
+  Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
 
 instance MonadTrans PermT where
-  lift = Choice mzero . Branch . Ap Monad (Choice (return id) Nil)
+  lift = Choice (Zero Unit) . Branch . Ap Monad (Choice (return id) Nil)
 
-instance (MonadPlus m, MonadIO m) => MonadIO (PermT m) where
+instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
 
-instance (MonadPlus m, MonadReader r m) => MonadReader r (PermT m) where
+instance MonadReader r m => MonadReader r (PermT m) where
   ask = lift ask
   local f (Choice a xs) = Choice a (mapB (localBranch f) xs)
 #if MIN_VERSION_mtl(2, 1, 0)
   reader = lift . reader
 #endif
 
-localBranch :: (MonadPlus m, MonadReader r m) =>
-               (r -> r) -> Branch m a -> Branch m a
+localBranch :: MonadReader r m => (r -> r) -> Branch m a -> Branch m a
 localBranch f (Ap dict perm m) = Ap dict (local f perm) (local f m)
 localBranch f (Bind k m) = Bind (local f . k) (local f m)
 
-instance (MonadPlus m, MonadState s m) => MonadState s (PermT m) where
+instance MonadState s m => MonadState s (PermT m) where
   get = lift get
   put = lift . put
 #if MIN_VERSION_mtl(2, 1, 0)
@@ -226,9 +233,9 @@ instance (MonadPlus m, MonadState s m) => MonadState s (PermT m) where
 #endif
 
 #ifdef LANGUAGE_DefaultSignatures
-instance (MonadPlus m, MonadThrow e m) => MonadThrow e (PermT m)
+instance MonadThrow e m => MonadThrow e (PermT m)
 #else
-instance (MonadPlus m, MonadThrow e m) => MonadThrow e (PermT m) where
+instance MonadThrow e m => MonadThrow e (PermT m) where
   throw = lift . throw
 #endif
 
@@ -239,7 +246,7 @@ liftZero zeroOption = Choice zeroOption Nil
 runPerm :: Alternative m => Perm m a -> m a
 runPerm = lower
   where
-    lower (Choice a xs) = foldrB f (option empty a) xs
+    lower (Choice a xs) = sumB f (option empty a) (<|>) xs
     f (Ap Monad perm m) = flip ($) `liftM` m `ap` runPerm perm
     f (Ap _ perm m) = m <**> runPerm perm
     f (Bind k m) = m >>= runPerm . k
@@ -248,14 +255,35 @@ runPerm = lower
 runPermT :: MonadPlus m => PermT m a -> m a
 runPermT = lower
   where
-    lower (Choice a xs) = foldrB f (option mzero a) xs
+    lower (Choice a xs) = sumB f (option mzero a) mplus xs
     f (Ap Applicative perm m) = m <**> runPermT perm
     f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
 
 -- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
 liftPerm :: Applicative m => m a -> PermT m a
-liftPerm = Choice empty . Branch . liftBranch
+liftPerm = Choice (Zero Unit) . Branch . liftBranch
 
 liftBranch :: Applicative m => m a -> Branch m a
 liftBranch = Ap Applicative (Choice (pure id) Nil)
+
+{- |
+Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
+@'PermT' m@ to @'PermT' n@.
+-}
+hoistPerm :: Monad n => (forall a . m a -> n a) -> PermT m b -> PermT n b
+hoistPerm f (Choice a xs) = Choice (hoistOption a) (hoistBranches f xs)
+
+hoistOption :: Monad n => Option m a -> Option n a
+hoistOption (Zero _) = Zero Unit
+hoistOption (Return _ a) = Return Monad a
+
+hoistBranches :: Monad n =>
+                 (forall a . m a -> n a) -> Branches m b -> Branches n b
+hoistBranches f (Plus _ m n) = Plus Unit (hoistBranches f m) (hoistBranches f n)
+hoistBranches f (Branch x) = Branch (hoistBranch f x)
+hoistBranches _ Nil = Nil
+
+hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
+hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
+hoistBranch f (Bind k m) = Bind (hoistPerm f . k) (f m)
