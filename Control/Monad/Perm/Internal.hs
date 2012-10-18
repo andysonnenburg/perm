@@ -81,7 +81,7 @@ instance Functor (Branch m) where
   a <$ Bind k m = Bind ((a <$) . k) m
 #endif
 
-instance Applicative (PermT m) where
+instance Applicative m => Applicative (PermT m) where
   pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
     Choice (f' <*> a') (fmap (`apB` a) fs <> fmap (f `apP`) as)
@@ -90,26 +90,26 @@ instance Applicative (PermT m) where
     Choice (m' *> n') (map (`thenBA` n) ms <> map (m `thenPA`) ns)
 #endif
 
-apP :: PermT m (a -> b) -> Branch m a -> Branch m b
-f `apP` Ap dict perm m = Ap dict (f .@ perm) m
+apP :: Applicative m => PermT m (a -> b) -> Branch m a -> Branch m b
+f `apP` Ap _ perm m = Ap Applicative (f .@ perm) m
 f `apP` Bind k m = Bind ((f `ap`) . k) m
 
 (.@) :: Applicative f => f (b -> c) -> f (a -> b) -> f (a -> c)
 (.@) = liftA2 (.)
 
-apB :: Branch m (a -> b) -> PermT m a -> Branch m b
-Ap dict perm m `apB` a = Ap dict (flipA2 perm a) m
+apB :: Applicative m => Branch m (a -> b) -> PermT m a -> Branch m b
+Ap _ perm m `apB` a = Ap Applicative (flipA2 perm a) m
 Bind k m `apB` a = Bind ((`ap` a) . k) m
 
 flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
-thenPA :: PermT m a -> Branch m b -> Branch m b
-m `thenPA` Ap dict perm n = Ap dict (m *> perm) n
+thenPA :: Applicative m => PermT m a -> Branch m b -> Branch m b
+m `thenPA` Ap _ perm n = Ap Applicative (m *> perm) n
 m `thenPA` Bind k n = Bind ((m *>) . k) n
 
-thenBA :: Branch m a -> PermT m b -> Branch m b
-Ap dict perm m `thenBA` n = Ap dict (perm *> fmap const n) m
+thenBA :: Applicative m => Branch m a -> PermT m b -> Branch m b
+Ap _ perm m `thenBA` n = Ap Applicative (perm *> fmap const n) m
 Bind k m `thenBA` n = Bind ((*> n) . k) m
 
 instance Applicative m => Alternative (PermT m) where
@@ -130,11 +130,11 @@ bindP k (Ap _ perm m) = Bind (\ a -> k . ($ a) =<< perm) m
 bindP k (Bind k' m) = Bind (k <=< k') m
 
 thenPM :: Monad m => PermT m a -> Branch m b -> Branch m b
-m `thenPM` Ap dict perm n = Ap dict (m >> perm) n
+m `thenPM` Ap _ perm n = Ap Monad (m >> perm) n
 m `thenPM` Bind k n = Bind ((m >>) . k) n
 
 thenBM :: Monad m => Branch m a -> PermT m b -> Branch m b
-Ap dict perm m `thenBM` n = Ap dict (perm >> fmap const n) m
+Ap _ perm m `thenBM` n = Ap Monad (perm >> fmap const n) m
 Bind k m `thenBM` n = Bind ((>> n) . k) m
 
 instance Monad m => MonadPlus (PermT m) where
