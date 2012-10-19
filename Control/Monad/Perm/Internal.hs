@@ -59,7 +59,7 @@ type Perm = PermT
 data PermT m a = Choice (Option m a) (Branches m a)
 
 data Option m a
-  = Zero (PlusDict m)
+  = Zero (ZeroDict m)
   | Return (Dict m) a
 
 data Branches m a
@@ -70,6 +70,8 @@ data Branches m a
 data Branch m b where
   Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
   Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
+
+type ZeroDict = PlusDict
 
 data PlusDict m where
   Alternative :: Alternative m => PlusDict m
