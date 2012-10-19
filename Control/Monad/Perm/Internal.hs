@@ -89,7 +89,7 @@ option n (Zero Unit) = n
 option _ (Return Applicative a) = pure a
 option _ (Return Monad a) = return a
 
-instance Monoid (Option m) where
+instance Monoid (Option m a) where
   mempty = Zero Unit
   Zero _ `mappend` r = r
   l `mappend` _ = l
