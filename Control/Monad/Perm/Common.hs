@@ -12,7 +12,7 @@ Maintainer: Andy Sonnenburg <andy22286@gmail.com>
 Stability: experimental
 Portability: non-portable
 -}
-module Control.Monad.Perm.Internal
+module Control.Monad.Perm.Common
        ( Perm
        , runPerm
        , PermT
@@ -46,6 +46,9 @@ import Data.Monoid (Monoid (mappend, mempty))
 
 import Prelude (($), (.), const, flip, id)
 
+import Control.Monad.Perm.Dict
+import Control.Monad.Perm.Option
+
 #if !MIN_VERSION_base(4, 5, 0)
 (<>) :: Monoid m => m -> m -> m
 (<>) = mappend
@@ -58,97 +61,85 @@ type Perm = PermT
 -- | The permutation monad
 data PermT m a = Choice (Option m a) (Branches m a)
 
-data Option m a
-  = Zero (ZeroDict m)
-  | Return (Dict m) a
+-- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
+runPerm :: Alternative m => Perm m a -> m a
+runPerm = lower
+  where
+    lower (Choice a xs) = sumB f (option empty a) (<|>) xs
+    f (Ap Monad perm m) = flip ($) `liftM` m `ap` runPerm perm
+    f (Ap _ perm m) = m <**> runPerm perm
+    f (Bind k m) = m >>= runPerm . k
+
+-- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
+runPermT :: MonadPlus m => PermT m a -> m a
+runPermT = lower
+  where
+    lower (Choice a xs) = sumB f (option mzero a) mplus xs
+    f (Ap Applicative perm m) = m <**> runPermT perm
+    f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
+    f (Bind k m) = m >>= runPermT . k
+
+-- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
+liftPerm :: Applicative m => m a -> PermT m a
+liftPerm = Choice mempty . Tip . liftBranch
+
+liftBranch :: Applicative m => m a -> Branch m a
+liftBranch = Ap Applicative (Choice (pure id) mempty)
+
+{- |
+Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
+@'PermT' m@ to @'PermT' n@.
+-}
+hoistPerm :: Monad n => (forall a . m a -> n a) -> PermT m b -> PermT n b
+hoistPerm f (Choice a xs) = Choice (hoistOption a) (hoistBranches f xs)
+
+hoistBranches :: Monad n =>
+                 (forall a . m a -> n a) -> Branches m b -> Branches n b
+hoistBranches f (Bin _ m n) = Bin Unit (hoistBranches f m) (hoistBranches f n)
+hoistBranches f (Tip x) = Tip (hoistBranch f x)
+hoistBranches _ Nil = Nil
+
+hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
+hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
+hoistBranch f (Bind k m) = Bind (hoistPerm f . k) (f m)
 
 data Branches m a
-  = Plus (PlusDict m) (Branches m a) (Branches m a)
-  | Branch (Branch m a)
-  | Nil
+  = Nil
+  | Tip (Branch m a)
+  | Bin (PlusDict m) (Branches m a) (Branches m a)
 
 data Branch m b where
   Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
   Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
 
-type ZeroDict = PlusDict
-
-data PlusDict m where
-  Alternative :: Alternative m => PlusDict m
-  MonadPlus :: MonadPlus m => PlusDict m
-  Unit :: PlusDict m
-
-data Dict m where
-  Applicative :: Applicative m => Dict m
-  Monad :: Monad m => Dict m
-
-option :: m a -> Option m a -> m a
-option _ (Zero Alternative) = empty
-option _ (Zero MonadPlus) = mzero
-option n (Zero Unit) = n
-option _ (Return Applicative a) = pure a
-option _ (Return Monad a) = return a
-
-instance Monoid (Option m a) where
-  mempty = Zero Unit
-  Zero _ `mappend` r = r
-  l `mappend` _ = l
-
-instance Functor (Option m) where
-  fmap _ (Zero dict) = Zero dict
-  fmap f (Return dict a) = Return dict (f a)
-
-instance Applicative m => Applicative (Option m) where
-  pure = Return Applicative
-  Return _ f <*> a = fmap f a
-  Zero dict <*> _ = Zero dict
-
-instance Alternative m => Alternative (Option m) where
-  empty = Zero Alternative
-  Zero _ <|> r = r
-  l <|> _ = l
-
-instance Monad m => Monad (Option m) where
-  return = Return Monad
-  Return _ a >>= k = k a
-  Zero dict >>= _ = Zero dict
-  Return _ _ >> k = k
-  Zero dict >> _ = Zero dict
-  fail _ = mempty
-
-instance MonadPlus m => MonadPlus (Option m) where
-  mzero = Zero MonadPlus
-  Zero _ `mplus` r = r
-  l `mplus` _ = l
-
 mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
-mapB f (Plus dict m n) = Plus dict (mapB f m) (mapB f n)
-mapB f (Branch x) = Branch (f x)
 mapB _ Nil = Nil
+mapB f (Tip x) = Tip (f x)
+mapB f (Bin dict m n) = Bin dict (mapB f m) (mapB f n)
 
 orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
-orB = Plus Alternative
+orB = Bin Alternative
 
 mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
-mplusB = Plus MonadPlus
+mplusB = Bin MonadPlus
 
 sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
 sumB f zero plus = go
   where
-    go (Plus Alternative m n) = go m <|> go n
-    go (Plus MonadPlus m n) = go m `mplus` go n
-    go (Plus Unit m n) = go m `plus` go n
-    go (Branch x) = f x
     go Nil = zero
+    go (Tip x) = f x
+    go (Bin Alternative m n) = go m <|> go n
+    go (Bin MonadPlus m n) = go m `mplus` go n
+    go (Bin Unit m n) = go m `plus` go n
 
 instance Monoid (Branches m a) where
   mempty = Nil
-  mappend = Plus Unit
+  mappend = Bin Unit
 
 instance Functor (Branches m) where
-  fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
-  fmap f (Branch a) = Branch (fmap f a)
   fmap _ Nil = Nil
+  fmap f (Tip a) = Tip (fmap f a)
+  fmap f (Bin dict m n) = Bin dict (fmap f m) (fmap f n)
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (f <$> xs)
@@ -208,7 +199,7 @@ instance MonadPlus m => MonadPlus (PermT m) where
   Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
 
 instance MonadTrans PermT where
-  lift = Choice mempty . Branch . Ap Monad (Choice (return id) mempty)
+  lift = Choice mempty . Tip . Ap Monad (Choice (return id) mempty)
 
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
@@ -237,49 +228,3 @@ instance MonadThrow e m => MonadThrow e (PermT m)
 instance MonadThrow e m => MonadThrow e (PermT m) where
   throw = lift . throw
 #endif
-
--- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
-runPerm :: Alternative m => Perm m a -> m a
-runPerm = lower
-  where
-    lower (Choice a xs) = sumB f (option empty a) (<|>) xs
-    f (Ap Monad perm m) = flip ($) `liftM` m `ap` runPerm perm
-    f (Ap _ perm m) = m <**> runPerm perm
-    f (Bind k m) = m >>= runPerm . k
-
--- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
-runPermT :: MonadPlus m => PermT m a -> m a
-runPermT = lower
-  where
-    lower (Choice a xs) = sumB f (option mzero a) mplus xs
-    f (Ap Applicative perm m) = m <**> runPermT perm
-    f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
-    f (Bind k m) = m >>= runPermT . k
-
--- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
-liftPerm :: Applicative m => m a -> PermT m a
-liftPerm = Choice mempty . Branch . liftBranch
-
-liftBranch :: Applicative m => m a -> Branch m a
-liftBranch = Ap Applicative (Choice (pure id) mempty)
-
-{- |
-Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
-@'PermT' m@ to @'PermT' n@.
--}
-hoistPerm :: Monad n => (forall a . m a -> n a) -> PermT m b -> PermT n b
-hoistPerm f (Choice a xs) = Choice (hoistOption a) (hoistBranches f xs)
-
-hoistOption :: Monad n => Option m a -> Option n a
-hoistOption (Zero _) = mempty
-hoistOption (Return _ a) = Return Monad a
-
-hoistBranches :: Monad n =>
-                 (forall a . m a -> n a) -> Branches m b -> Branches n b
-hoistBranches f (Plus _ m n) = Plus Unit (hoistBranches f m) (hoistBranches f n)
-hoistBranches f (Branch x) = Branch (hoistBranch f x)
-hoistBranches _ Nil = Nil
-
-hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
-hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
-hoistBranch f (Bind k m) = Bind (hoistPerm f . k) (f m)

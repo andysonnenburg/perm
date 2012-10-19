@@ -12,7 +12,7 @@ module Control.Applicative.Perm
        , hoistPerm
        ) where
 
-import Control.Monad.Perm.Internal (Perm,
-                                    runPerm,
-                                    liftPerm,
-                                    hoistPerm)
+import Control.Monad.Perm.Common (Perm,
+                                  runPerm,
+                                  liftPerm,
+                                  hoistPerm)
