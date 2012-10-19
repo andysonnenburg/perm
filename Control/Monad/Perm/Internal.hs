@@ -44,7 +44,7 @@ import Data.Monoid (Monoid (mappend, mempty), (<>))
 import Data.Monoid (Monoid (mappend, mempty))
 #endif
 
-import Prelude (($), (.), const, flip, fst, id, map)
+import Prelude (($), (.), const, flip, id)
 
 #if !MIN_VERSION_base(4, 5, 0)
 (<>) :: Monoid m => m -> m -> m
@@ -58,52 +58,27 @@ type Perm = PermT
 -- | The permutation monad
 data PermT m a = Choice (Option m a) (Branches m a)
 
-data Branch m b where
-  Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
-  Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
+data Option m a
+  = Zero (PlusDict m)
+  | Return (Dict m) a
 
 data Branches m a
   = Plus (PlusDict m) (Branches m a) (Branches m a)
   | Branch (Branch m a)
   | Nil
 
+data Branch m b where
+  Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
+  Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
+
 data PlusDict m where
   Alternative :: Alternative m => PlusDict m
   MonadPlus :: MonadPlus m => PlusDict m
   Unit :: PlusDict m
 
-mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
-mapB f (Plus dict m n) = Plus dict (mapB f m) (mapB f n)
-mapB f (Branch x) = Branch (f x)
-mapB _ Nil = Nil
-
-orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
-orB = Plus Alternative
-
-mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
-mplusB = Plus MonadPlus
-
-sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
-sumB f zero plus = go
-  where
-    go (Plus Alternative m n) = go m <|> go n
-    go (Plus MonadPlus m n) = go m `mplus` go n
-    go (Plus Unit m n) = go m `plus` go n
-    go (Branch x) = f x
-    go Nil = zero
-
-instance Monoid (Branches m a) where
-  mempty = Nil
-  mappend = Plus Unit
-
-instance Functor (Branches m) where
-  fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
-  fmap f (Branch a) = Branch (fmap f a)
-  fmap _ Nil = Nil
-
-data Option m a
-  = Zero (PlusDict m)
-  | Return (Dict m) a
+data Dict m where
+  Applicative :: Applicative m => Dict m
+  Monad :: Monad m => Dict m
 
 option :: m a -> Option m a -> m a
 option _ (Zero Alternative) = empty
@@ -139,9 +114,34 @@ instance MonadPlus m => MonadPlus (Option m) where
   Zero _ `mplus` r = r
   l `mplus` _ = l
 
-data Dict m where
-  Applicative :: Applicative m => Dict m
-  Monad :: Monad m => Dict m
+mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
+mapB f (Plus dict m n) = Plus dict (mapB f m) (mapB f n)
+mapB f (Branch x) = Branch (f x)
+mapB _ Nil = Nil
+
+orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
+orB = Plus Alternative
+
+mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
+mplusB = Plus MonadPlus
+
+sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
+sumB f zero plus = go
+  where
+    go (Plus Alternative m n) = go m <|> go n
+    go (Plus MonadPlus m n) = go m `mplus` go n
+    go (Plus Unit m n) = go m `plus` go n
+    go (Branch x) = f x
+    go Nil = zero
+
+instance Monoid (Branches m a) where
+  mempty = Nil
+  mappend = Plus Unit
+
+instance Functor (Branches m) where
+  fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
+  fmap f (Branch a) = Branch (fmap f a)
+  fmap _ Nil = Nil
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (f <$> xs)
