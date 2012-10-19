@@ -27,7 +27,7 @@ library
     Control.Applicative.Perm
     Control.Monad.Perm
   other-modules:
-    Control.Monad.Perm.Common
+    Control.Monad.Perm.Base
     Control.Monad.Perm.Dict
     Control.Monad.Perm.Option
   build-depends:
