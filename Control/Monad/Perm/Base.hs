@@ -88,6 +88,15 @@ runPermT = lower
     f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
 
+sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
+sumB f zero plus = go
+  where
+    go Nil = zero
+    go (Tip x) = f x
+    go (Bin Alternative m n) = go m <|> go n
+    go (Bin MonadPlus m n) = go m `mplus` go n
+    go (Bin Unit m n) = go m `plus` go n
+
 -- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
 liftPerm :: Applicative m => m a -> PermT m a
 liftPerm = Choice mempty . Tip . liftBranch
@@ -152,6 +161,9 @@ instance Alternative m => Alternative (PermT m) where
   m@(Choice (Return _ _) _) <|> _ = m
   Choice (Zero _) xs <|> Choice b ys = Choice b (xs `orB` ys)
 
+orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
+orB = Bin Alternative
+
 instance Monad m => Monad (PermT m) where
   return a = Choice (return a) mempty
   Choice (Zero dict) xs >>= k = Choice (Zero dict) (mapB (bindP k) xs)
@@ -177,6 +189,9 @@ instance MonadPlus m => MonadPlus (PermT m) where
   mzero = Choice mzero mempty
   m@(Choice (Return _ _) _) `mplus` _ = m
   Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
+
+mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
+mplusB = Bin MonadPlus
 
 instance MonadTrans PermT where
   lift = Choice mempty . Tip . Ap Monad (Choice (return id) mempty)
@@ -213,18 +228,3 @@ mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
 mapB _ Nil = Nil
 mapB f (Tip x) = Tip (f x)
 mapB f (Bin dict m n) = Bin dict (mapB f m) (mapB f n)
-
-orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
-orB = Bin Alternative
-
-mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
-mplusB = Bin MonadPlus
-
-sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
-sumB f zero plus = go
-  where
-    go Nil = zero
-    go (Tip x) = f x
-    go (Bin Alternative m n) = go m <|> go n
-    go (Bin MonadPlus m n) = go m `mplus` go n
-    go (Bin Unit m n) = go m `plus` go n
