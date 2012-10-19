@@ -89,6 +89,11 @@ option n (Zero Unit) = n
 option _ (Return Applicative a) = pure a
 option _ (Return Monad a) = return a
 
+instance Monoid (Option m) where
+  mempty = Zero Unit
+  Zero _ `mappend` r = r
+  l `mappend` _ = l
+
 instance Functor (Option m) where
   fmap _ (Zero dict) = Zero dict
   fmap f (Return dict a) = Return dict (f a)
@@ -109,7 +114,7 @@ instance Monad m => Monad (Option m) where
   Zero dict >>= _ = Zero dict
   Return _ _ >> k = k
   Zero dict >> _ = Zero dict
-  fail _ = Zero Unit
+  fail _ = mempty
 
 instance MonadPlus m => MonadPlus (Option m) where
   mzero = Zero MonadPlus
@@ -224,7 +229,7 @@ instance MonadPlus m => MonadPlus (PermT m) where
   Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
 
 instance MonadTrans PermT where
-  lift = Choice (Zero Unit) . Branch . Ap Monad (Choice (return id) mempty)
+  lift = Choice mempty . Branch . Ap Monad (Choice (return id) mempty)
 
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
@@ -277,7 +282,7 @@ runPermT = lower
 
 -- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
 liftPerm :: Applicative m => m a -> PermT m a
-liftPerm = Choice (Zero Unit) . Branch . liftBranch
+liftPerm = Choice mempty . Branch . liftBranch
 
 liftBranch :: Applicative m => m a -> Branch m a
 liftBranch = Ap Applicative (Choice (pure id) mempty)
@@ -290,7 +295,7 @@ hoistPerm :: Monad n => (forall a . m a -> n a) -> PermT m b -> PermT n b
 hoistPerm f (Choice a xs) = Choice (hoistOption a) (hoistBranches f xs)
 
 hoistOption :: Monad n => Option m a -> Option n a
-hoistOption (Zero _) = Zero Unit
+hoistOption (Zero _) = mempty
 hoistOption (Return _ a) = Return Monad a
 
 hoistBranches :: Monad n =>
