@@ -152,26 +152,15 @@ instance Functor (Branches m) where
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (f <$> xs)
-#if MIN_VERSION_base(4, 2, 0)
-  a <$ Choice b xs = Choice (a <$ b) (a <$ xs)
-#endif
 
 instance Functor (Branch m) where
   fmap f (Ap dict perm m) = Ap dict (fmap (f .) perm) m
   fmap f (Bind k m) = Bind (fmap f . k) m
-#if MIN_VERSION_base(4, 2, 0)
-  a <$ Ap dict perm m = Ap dict (const a <$ perm) m
-  a <$ Bind k m = Bind ((a <$) . k) m
-#endif
 
 instance Applicative m => Applicative (PermT m) where
   pure a = Choice (pure a) mempty
   f@(Choice f' fs) <*> a@(Choice a' as) =
     Choice (f' <*> a') (mapB (`apB` a) fs <> mapB (f `apP`) as)
-#if MIN_VERSION_base(4, 2, 0)
-  m@(Choice m' ms) *> n@(Choice n' ns) =
-    Choice (m' *> n') (mapB (`thenBA` n) ms <> mapB (m `thenPA`) ns)
-#endif
 
 apP :: Applicative m => PermT m (a -> b) -> Branch m a -> Branch m b
 f `apP` Ap _ perm m = Ap Applicative (f .@ perm) m
@@ -187,18 +176,8 @@ Bind k m `apB` a = Bind ((<*> a) . k) m
 flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
 
-#if MIN_VERSION_base(4, 2, 0)
-thenPA :: Applicative m => PermT m a -> Branch m b -> Branch m b
-m `thenPA` Ap _ perm n = Ap Applicative (m *> perm) n
-m `thenPA` Bind k n = Bind ((m *>) . k) n
-
-thenBA :: Applicative m => Branch m a -> PermT m b -> Branch m b
-Ap _ perm m `thenBA` n = Ap Applicative (perm *> fmap const n) m
-Bind k m `thenBA` n = Bind ((*> n) . k) m
-#endif
-
 instance Alternative m => Alternative (PermT m) where
-  empty = liftZero empty
+  empty = Choice empty mempty
   m@(Choice (Return _ _) _) <|> _ = m
   Choice (Zero _) xs <|> Choice b ys = Choice b (xs `orB` ys)
 
@@ -224,7 +203,7 @@ Ap _ perm m `thenBM` n = Ap Monad (perm >> fmap const n) m
 Bind k m `thenBM` n = Bind ((>> n) . k) m
 
 instance MonadPlus m => MonadPlus (PermT m) where
-  mzero = liftZero mzero
+  mzero = Choice mzero mempty
   m@(Choice (Return _ _) _) `mplus` _ = m
   Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
 
@@ -258,9 +237,6 @@ instance MonadThrow e m => MonadThrow e (PermT m)
 instance MonadThrow e m => MonadThrow e (PermT m) where
   throw = lift . throw
 #endif
-
-liftZero :: Option m a -> PermT m a
-liftZero zeroOption = Choice zeroOption mempty
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 runPerm :: Alternative m => Perm m a -> m a
