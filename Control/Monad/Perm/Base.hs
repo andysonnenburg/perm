@@ -12,7 +12,7 @@ Maintainer: Andy Sonnenburg <andy22286@gmail.com>
 Stability: experimental
 Portability: non-portable
 -}
-module Control.Monad.Perm.Common
+module Control.Monad.Perm.Base
        ( Perm
        , runPerm
        , PermT
