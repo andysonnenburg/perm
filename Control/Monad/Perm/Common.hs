@@ -61,6 +61,15 @@ type Perm = PermT
 -- | The permutation monad
 data PermT m a = Choice (Option m a) (Branches m a)
 
+data Branches m a
+  = Nil
+  | Tip (Branch m a)
+  | Bin (PlusDict m) (Branches m a) (Branches m a)
+
+data Branch m b where
+  Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
+  Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
+
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 runPerm :: Alternative m => Perm m a -> m a
 runPerm = lower
@@ -103,46 +112,17 @@ hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
 hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
 hoistBranch f (Bind k m) = Bind (hoistPerm f . k) (f m)
 
-data Branches m a
-  = Nil
-  | Tip (Branch m a)
-  | Bin (PlusDict m) (Branches m a) (Branches m a)
-
-data Branch m b where
-  Ap :: Dict m -> PermT m (a -> b) -> m a -> Branch m b
-  Bind :: Monad m => (a -> PermT m b) -> m a -> Branch m b
-
-mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
-mapB _ Nil = Nil
-mapB f (Tip x) = Tip (f x)
-mapB f (Bin dict m n) = Bin dict (mapB f m) (mapB f n)
-
-orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
-orB = Bin Alternative
-
-mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
-mplusB = Bin MonadPlus
-
-sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
-sumB f zero plus = go
-  where
-    go Nil = zero
-    go (Tip x) = f x
-    go (Bin Alternative m n) = go m <|> go n
-    go (Bin MonadPlus m n) = go m `mplus` go n
-    go (Bin Unit m n) = go m `plus` go n
-
 instance Monoid (Branches m a) where
   mempty = Nil
   mappend = Bin Unit
+
+instance Functor (PermT m) where
+  fmap f (Choice a xs) = Choice (f <$> a) (f <$> xs)
 
 instance Functor (Branches m) where
   fmap _ Nil = Nil
   fmap f (Tip a) = Tip (fmap f a)
   fmap f (Bin dict m n) = Bin dict (fmap f m) (fmap f n)
-
-instance Functor (PermT m) where
-  fmap f (Choice a xs) = Choice (f <$> a) (f <$> xs)
 
 instance Functor (Branch m) where
   fmap f (Ap dict perm m) = Ap dict (fmap (f .) perm) m
@@ -228,3 +208,23 @@ instance MonadThrow e m => MonadThrow e (PermT m)
 instance MonadThrow e m => MonadThrow e (PermT m) where
   throw = lift . throw
 #endif
+
+mapB :: (Branch m a -> Branch m b) -> Branches m a -> Branches m b
+mapB _ Nil = Nil
+mapB f (Tip x) = Tip (f x)
+mapB f (Bin dict m n) = Bin dict (mapB f m) (mapB f n)
+
+orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
+orB = Bin Alternative
+
+mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
+mplusB = Bin MonadPlus
+
+sumB :: (Branch m a -> m a) -> m a -> (m a -> m a -> m a) -> Branches m a -> m a
+sumB f zero plus = go
+  where
+    go Nil = zero
+    go (Tip x) = f x
+    go (Bin Alternative m n) = go m <|> go n
+    go (Bin MonadPlus m n) = go m `mplus` go n
+    go (Bin Unit m n) = go m `plus` go n
