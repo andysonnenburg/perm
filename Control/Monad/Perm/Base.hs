@@ -72,18 +72,16 @@ data Branch m b where
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 runPerm :: Alternative m => Perm m a -> m a
-runPerm = lower
+runPerm (Choice a xs) = sumB f (option empty a) (<|>) xs
   where
-    lower (Choice a xs) = sumB f (option empty a) (<|>) xs
     f (Ap Monad perm m) = flip ($) `liftM` m `ap` runPerm perm
     f (Ap _ perm m) = m <**> runPerm perm
     f (Bind k m) = m >>= runPerm . k
 
 -- | Unwrap a 'PermT', combining actions using the 'MonadPlus' for @f@.
 runPermT :: MonadPlus m => PermT m a -> m a
-runPermT = lower
+runPermT (Choice a xs) = sumB f (option mzero a) mplus xs
   where
-    lower (Choice a xs) = sumB f (option mzero a) mplus xs
     f (Ap Applicative perm m) = m <**> runPermT perm
     f (Ap _ perm m) = flip ($) `liftM` m `ap` runPermT perm
     f (Bind k m) = m >>= runPermT . k
@@ -99,7 +97,10 @@ sumB f zero plus = go
 
 -- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
 liftPerm :: Applicative m => m a -> PermT m a
-liftPerm = Choice mempty . Tip . liftBranch
+liftPerm = Choice mempty . liftBranches
+
+liftBranches :: Applicative m => m a -> Branches m a
+liftBranches = Tip . liftBranch
 
 liftBranch :: Applicative m => m a -> Branch m a
 liftBranch = Ap Applicative (Choice (pure id) mempty)
@@ -113,17 +114,13 @@ hoistPerm f (Choice a xs) = Choice (hoistOption a) (hoistBranches f xs)
 
 hoistBranches :: Monad n =>
                  (forall a . m a -> n a) -> Branches m b -> Branches n b
-hoistBranches f (Bin _ m n) = Bin Unit (hoistBranches f m) (hoistBranches f n)
-hoistBranches f (Tip x) = Tip (hoistBranch f x)
 hoistBranches _ Nil = Nil
+hoistBranches f (Tip x) = Tip (hoistBranch f x)
+hoistBranches f (Bin _ m n) = Bin Unit (hoistBranches f m) (hoistBranches f n)
 
 hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
 hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
 hoistBranch f (Bind k m) = Bind (hoistPerm f . k) (f m)
-
-instance Monoid (Branches m a) where
-  mempty = Nil
-  mappend = Bin Unit
 
 instance Functor (PermT m) where
   fmap f (Choice a xs) = Choice (f <$> a) (f <$> xs)
@@ -195,6 +192,10 @@ mplusB = Bin MonadPlus
 
 instance MonadTrans PermT where
   lift = Choice mempty . Tip . Ap Monad (Choice (return id) mempty)
+
+instance Monoid (Branches m a) where
+  mempty = Nil
+  mappend = Bin Unit
 
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
