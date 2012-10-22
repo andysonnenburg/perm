@@ -156,7 +156,7 @@ flipA2 = liftA2 flip
 instance Alternative m => Alternative (PermT m) where
   empty = Choice empty mempty
   m@(Choice (Return _ _) _) <|> _ = m
-  Choice (Zero _) xs <|> Choice b ys = Choice b (xs `orB` ys)
+  Choice _ xs <|> Choice b ys = Choice b (xs `orB` ys)
 
 orB :: Alternative m => Branches m a -> Branches m a -> Branches m a
 orB = Bin Alternative
@@ -166,6 +166,7 @@ instance Monad m => Monad (PermT m) where
   Choice (Zero dict) xs >>= k = Choice (Zero dict) (mapB (bindP k) xs)
   Choice (Return _ a) xs >>= k = case k a of
     Choice a' xs' -> Choice a' (mapB (bindP k) xs <> xs')
+  Choice (Fail s) xs >>= k = Choice (Fail s) (mapB (bindP k) xs)
   m@(Choice m' ms) >> n@(Choice n' ns) =
     Choice (m' >> n') (mapB (`thenBM` n) ms <> mapB (m `thenPM`) ns)
   fail s = Choice (fail s) mempty
@@ -185,7 +186,7 @@ Bind k m `thenBM` n = Bind ((>> n) . k) m
 instance MonadPlus m => MonadPlus (PermT m) where
   mzero = Choice mzero mempty
   m@(Choice (Return _ _) _) `mplus` _ = m
-  Choice (Zero _) xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
+  Choice _ xs `mplus` Choice b ys = Choice b (xs `mplusB` ys)
 
 mplusB :: MonadPlus m => Branches m a -> Branches m a -> Branches m a
 mplusB = Bin MonadPlus
@@ -195,7 +196,9 @@ instance MonadTrans PermT where
 
 instance Monoid (Branches m a) where
   mempty = Nil
-  mappend = Bin Unit
+  Nil `mappend` ys = ys
+  xs `mappend` Nil = xs
+  xs `mappend` ys = Bin Unit xs ys
 
 instance MonadIO m => MonadIO (PermT m) where
   liftIO = lift . liftIO
