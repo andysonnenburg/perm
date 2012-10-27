@@ -12,7 +12,12 @@ module Control.Applicative.Perm
        , hoistPerm
        ) where
 
-import Control.Monad.Perm.Base (Perm,
-                                runPerm,
-                                liftPerm,
-                                hoistPerm)
+import Control.Applicative
+import Control.Monad.Perm.Internal (Perm,
+                                    sum1,
+                                    liftPerm,
+                                    hoistPerm)
+
+-- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
+runPerm :: Alternative m => Perm m a -> m a
+runPerm = sum1

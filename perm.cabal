@@ -27,9 +27,8 @@ library
     Control.Applicative.Perm
     Control.Monad.Perm
   other-modules:
-    Control.Monad.Perm.Base
+    Control.Monad.Perm.Internal
     Control.Monad.Perm.Dict
-    Control.Monad.Perm.Option
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,
