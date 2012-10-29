@@ -28,7 +28,6 @@ import Control.Monad.Catch.Class (MonadThrow)
 #else
 import Control.Monad.Catch.Class (MonadThrow (throw))
 #endif
-import Control.Monad.Fix (MonadFix (mfix), fix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 #if MIN_VERSION_mtl(2, 1, 0)
 import Control.Monad.Reader.Class (MonadReader (ask, local, reader))
@@ -38,6 +37,8 @@ import Control.Monad.Reader.Class (MonadReader (ask, local))
 import Control.Monad.State.Class (MonadState (get, put))
 #endif
 import Control.Monad.Trans.Class (MonadTrans (lift))
+
+import Data.Function (fix)
 
 import Prelude (($), (.), const, flip, id, snd, undefined)
 
@@ -128,20 +129,16 @@ instance Alternative m => Alternative (Perm m) where
 
 instance Monad m => Monad (Perm m) where
   return = Branch . Return Monad
-  m >>= k = mfix' (\ a -> mapB (`thenB` k a) m) <>
-            mfix' (\ a -> mapB (m `thenP`) (k a))
+  m >>= k = mapB (`bindB` k) m <> mfix' (mapB (m `thenP`) . k)
   fail = lift . fail
 
-instance Monad m => MonadFix (Perm m) where
-  mfix f = snd $ fix $ \ ~(a, _) -> (a, f a)
+mfix' :: Functor m => (a -> m b) -> m b
+mfix' f = snd $ fix (\ ~(a, _) -> (a, f a))
 
-mfix' :: (Functor m, MonadFix m) => (a -> m b) -> m b
-mfix' f = snd <$> mfix (\ ~(a, _) -> (\ b -> (a, b)) <$> f a)
-
-thenB :: Monad m => Branch m a -> Perm m b -> Branch m b
-Ap _ perm m `thenB` n = Ap Monad (perm >> const <$> n) m
-Bind k m `thenB` n = Bind ((>> n) . k) m
-Return _ _ `thenB` n = Ap Monad (const <$> n) (return ())
+bindB :: Monad m => Branch m a -> (a -> Perm m b) -> Branch m b
+Ap _ perm m `bindB` k = Bind (\ a -> k . ($ a) =<< perm) m
+Bind k m `bindB` k' = Bind (k' <=< k) m
+Return _ a `bindB` k = Ap Monad (const <$> k a) (return ())
 
 thenP :: Monad m => Perm m a -> Branch m b -> Branch m b
 m `thenP` Ap _ perm n = Ap Monad (m >> perm) n
