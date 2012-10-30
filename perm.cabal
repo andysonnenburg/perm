@@ -1,5 +1,5 @@
 name:          perm
-version:       0.3.0.1
+version:       0.4.0.0
 cabal-version: >= 1.10
 synopsis:      permutation Applicative and Monad with many mtl instances
 description:
@@ -28,7 +28,6 @@ library
     Control.Monad.Perm
   other-modules:
     Control.Monad.Perm.Internal
-    Control.Monad.Perm.Dict
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,

@@ -40,9 +40,7 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Function (fix)
 
-import Prelude (($), (.), const, flip, id, snd, undefined)
-
-import Control.Monad.Perm.Dict
+import Prelude (($), (.), const, flip, id, snd)
 
 -- | The permutation applicative
 data Perm m a
@@ -52,7 +50,16 @@ data Perm m a
 data Branch m a where
   Ap :: Dict m -> Perm m (a -> b) -> m a -> Branch m b
   Bind :: Monad m => (a -> Perm m b) -> m a -> Branch m b
-  Return :: Dict m -> a -> Branch m a
+  Lift :: m a -> Branch m a
+
+data Dict m where
+  Applicative :: Applicative m => Dict m
+  Monad :: Monad m => Dict m
+
+data PlusDict m where
+  Alternative :: Alternative m => PlusDict m
+  MonadPlus :: MonadPlus m => PlusDict m
+  Unit :: PlusDict m
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 sum1 :: Alternative m => Perm m a -> m a
@@ -72,12 +79,11 @@ runBranch :: Branch m b -> (forall a . m a -> m a -> m a) -> m b
 runBranch (Ap Applicative perm m) plus = m <**> runPerm perm plus
 runBranch (Ap Monad perm m) plus = flip ($) `liftM` m `ap` runPerm perm plus
 runBranch (Bind k m) plus = m >>= \ a -> runPerm (k a) plus
-runBranch (Return Applicative a) _ = pure a
-runBranch (Return Monad a) _ = return a
+runBranch (Lift m) _ = m
 
--- | A version of 'lift' that can be used with just an 'Applicative' for @m@.
-liftPerm :: Applicative m => m a -> Perm m a
-liftPerm = Branch . Ap Applicative (pure id)
+-- | A version of 'lift' that can be used without a 'Monad' for @m@.
+liftPerm :: m a -> Perm m a
+liftPerm = Branch . Lift
 
 {- |
 Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
@@ -90,32 +96,30 @@ hoistPerm f (Plus _ m n) = Plus Unit (hoistPerm f m) (hoistPerm f n)
 hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
 hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
 hoistBranch f (Bind k m) = Bind (hoistPerm f . k) (f m)
-hoistBranch _ (Return _ a) = Return Monad a
+hoistBranch f (Lift m) = Lift (f m)
 
-instance Functor (Perm m) where
+instance Functor m => Functor (Perm m) where
   fmap f (Branch m) = Branch (fmap f m)
   fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
 
-instance Functor (Branch m) where
+instance Functor m => Functor (Branch m) where
   fmap f (Ap dict perm m) = Ap dict (fmap (f .) perm) m
   fmap f (Bind k m) = Bind (fmap f . k) m
-  fmap f (Return dict a) = Return dict (f a)
+  fmap f (Lift m) = Lift (fmap f m)
 
 instance Applicative m => Applicative (Perm m) where
-  pure = Branch . Return Applicative
+  pure = liftPerm . pure
   f <*> a = mapB (`apB` a) f <> mapB (f `apP`) a
 
 apB :: Applicative m => Branch m (a -> b) -> Perm m a -> Branch m b
 Ap _ perm m `apB` a = Ap Applicative (flipA2 perm a) m
 Bind k m `apB` a = Bind ((<*> a) . k) m
-Return Applicative f `apB` a = Ap Applicative (flip ($) <$> a) (pure f)
-Return Monad f `apB` a = Ap Applicative (flip ($) <$> a) (return f)
+Lift f `apB` a = Ap Applicative (flip ($) <$> a) f
 
 apP :: Applicative m => Perm m (a -> b) -> Branch m a -> Branch m b
 f `apP` Ap _ perm m = Ap Applicative (f .@ perm) m
 f `apP` Bind k m = Bind ((f <*>) . k) m
-f `apP` Return Applicative a = Ap Applicative f (pure a)
-f `apP` Return Monad a = Ap Applicative f (return a)
+f `apP` Lift a = Ap Applicative f a
 
 flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
@@ -128,30 +132,38 @@ instance Alternative m => Alternative (Perm m) where
   (<|>) = Plus Alternative
 
 instance Monad m => Monad (Perm m) where
-  return = Branch . Return Monad
+  return = lift . return
   m >>= k = mapB (`bindB` k) m <> mfix' (mapB (m `thenP`) . k)
   fail = lift . fail
 
-mfix' :: Functor m => (a -> m b) -> m b
-mfix' f = snd $ fix (\ ~(a, _) -> (a, f a))
-
 bindB :: Monad m => Branch m a -> (a -> Perm m b) -> Branch m b
 Ap _ perm m `bindB` k = Bind (\ a -> k . ($ a) =<< perm) m
-Bind k m `bindB` k' = Bind (k' <=< k) m
-Return _ a `bindB` k = Ap Monad (const <$> k a) (return ())
+Bind f m `bindB` g = Bind (g <=< f) m
+Lift m `bindB` k = Bind k m
+
+mfix' :: (a -> m b) -> m b
+mfix' f = snd $ fix $ \ ~(a, _) -> (a, f a)
 
 thenP :: Monad m => Perm m a -> Branch m b -> Branch m b
 m `thenP` Ap _ perm n = Ap Monad (m >> perm) n
 m `thenP` Bind k n = Bind ((m >>) . k) n
-m `thenP` Return Applicative a = Ap Monad (flip const <$> m) (pure a)
-m `thenP` Return Monad a = Ap Monad (flip const <$> m) (return a)
+m `thenP` Lift n = Ap Monad (flip const `liftP` m) n
+
+liftP :: Monad m => (a -> b) -> Perm m a -> Perm m b
+liftP f (Branch m) = Branch (liftB f m)
+liftP f (Plus dict m n) = Plus dict (liftP f m) (liftP f n)
+
+liftB :: Monad m => (a -> b) -> Branch m a -> Branch m b
+liftB f (Ap dict perm m) = Ap dict (liftP (f .) perm) m
+liftB f (Bind k m) = Bind (liftP f . k) m
+liftB f (Lift m) = Lift (liftM f m)
 
 instance MonadPlus m => MonadPlus (Perm m) where
   mzero = lift mzero
   mplus = Plus MonadPlus
 
 instance MonadTrans Perm where
-  lift = Branch . Ap Monad (return id)
+  lift = Branch . Lift
 
 instance MonadIO m => MonadIO (Perm m) where
   liftIO = lift . liftIO
@@ -166,7 +178,7 @@ instance MonadReader r m => MonadReader r (Perm m) where
 localBranch :: MonadReader r m => (r -> r) -> Branch m a -> Branch m a
 localBranch f (Ap dict perm m) = Ap dict (local f perm) (local f m)
 localBranch f (Bind k m) = Bind (local f . k) (local f m)
-localBranch _ (Return dict a) = Return dict a
+localBranch f (Lift m) = Lift (local f m)
 
 instance MonadState s m => MonadState s (Perm m) where
   get = lift get
