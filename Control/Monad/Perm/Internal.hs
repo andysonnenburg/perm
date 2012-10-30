@@ -139,7 +139,28 @@ instance Alternative m => Alternative (Perm m) where
 instance MonadFix m => Monad (Perm m) where
   return = lift . return
   (>>=) = Bind
+  (>>) = then'
   fail = lift . fail
+
+then' :: Monad m => Perm m a -> Perm m b -> Perm m b
+m `then'` n = mapB (`thenB` n) m <> mapB (m `thenP`) n
+
+thenB :: Monad m => Branch m a -> Perm m b -> Branch m b
+Ap dict perm m `thenB` n = Ap dict (perm `then'` liftM' const n) m
+Lift m `thenB` n = Ap Monad (liftM' const n) m
+
+thenP :: Monad m => Perm m a -> Branch m b -> Branch m b
+m `thenP` Ap dict perm n = Ap dict (m `then'` perm) n
+m `thenP` Lift n = Ap Monad (liftM' (flip const) m) n
+
+liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
+liftM' f (Branch m) = Branch (liftB f m)
+liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
+liftM' f (Bind m k) = Bind m (liftM' f . k)
+
+liftB :: Monad m => (a -> b) -> Branch m a -> Branch m b
+liftB f (Ap dict perm m) = Ap dict (liftM' (f .) perm) m
+liftB f (Lift m) = Lift (liftM f m)
 
 instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
   mzero = lift mzero
