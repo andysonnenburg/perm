@@ -39,6 +39,8 @@ import Control.Monad.State.Class (MonadState (get, put))
 #endif
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
+import Data.Monoid (Monoid (mappend, mempty))
+
 import Prelude (($), (.), const, flip, id, snd)
 
 -- | The permutation applicative
@@ -96,6 +98,10 @@ hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
 hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
 hoistBranch f (Bind m k) = Bind (f m) (hoistPerm f . k)
 hoistBranch f (Lift m) = Lift (f m)
+
+instance Monoid (m a) => Monoid (Perm m a) where
+  mappend = Plus Unit
+  mempty = liftPerm mempty
 
 instance Functor m => Functor (Perm m) where
   fmap f (Branch m) = Branch (fmap f m)
@@ -205,10 +211,10 @@ instance MonadThrow e m => MonadThrow e (Perm m) where
   throw = lift . throw
 #endif
 
-infixr 6 <>
-(<>) :: Perm m a -> Perm m a -> Perm m a
-(<>) = Plus Unit
-
 mapB :: (Branch m a -> Branch m b) -> Perm m a -> Perm m b
 mapB f (Branch m) = Branch (f m)
 mapB f (Plus dict m n) = Plus dict (mapB f m) (mapB f n)
+
+infixr 6 <>
+(<>) :: Perm m a -> Perm m a -> Perm m a
+(<>) = Plus Unit
