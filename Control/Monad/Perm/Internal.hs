@@ -39,6 +39,7 @@ import Control.Monad.State.Class (MonadState (get, put))
 #endif
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
+import Data.Maybe (Maybe (Nothing, Just), fromMaybe)
 import Data.Monoid (Monoid (mappend, mempty))
 
 import Prelude (($), (.), const, flip, id, snd)
@@ -49,18 +50,29 @@ data Perm m a where
   Plus :: PlusDict m -> Perm m a -> Perm m a -> Perm m a
 
 data Branch m a where
-  Ap :: Dict m -> Perm m (a -> b) -> m a -> Branch m b
+  Ap :: FlipApDict m -> Perm m (a -> b) -> m a -> Branch m b
   Bind :: Monad m => m a -> (a -> Perm m b) -> Branch m b
   Lift :: m a -> Branch m a
 
-data Dict m where
-  Applicative :: Applicative m => Dict m
-  Monad :: Monad m => Dict m
+newtype PlusDict m =
+  PlusDict { getPlusDict :: forall a . Maybe (m a -> m a -> m a)
+           }
 
-data PlusDict m where
-  Alternative :: Alternative m => PlusDict m
-  MonadPlus :: MonadPlus m => PlusDict m
-  Unit :: PlusDict m
+fromPlusDict :: (forall a . m a -> m a -> m a) ->
+                PlusDict m ->
+                m b -> m b -> m b
+fromPlusDict d = fromMaybe d . getPlusDict
+
+alternative :: Alternative m => PlusDict m
+alternative = PlusDict (Just (<|>))
+
+monadPlus :: MonadPlus m => PlusDict m
+monadPlus = PlusDict (Just mplus)
+
+unit :: PlusDict m
+unit = PlusDict Nothing
+
+type FlipApDict m = forall a b . m a -> m (a -> b) -> m b
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 sum1 :: Alternative m => Perm m a -> m a
@@ -72,13 +84,10 @@ sum1M m = runPerm m mplus
 
 runPerm :: Perm m b -> (forall a . m a -> m a -> m a) -> m b
 runPerm (Branch m) plus = runBranch m plus
-runPerm (Plus Alternative m n) plus = runPerm m plus <|> runPerm n plus
-runPerm (Plus MonadPlus m n) plus = runPerm m plus `mplus` runPerm n plus
-runPerm (Plus Unit m n) plus = runPerm m plus `plus` runPerm n plus
+runPerm (Plus x m n) d = fromPlusDict d x (runPerm m d) (runPerm n d)
 
 runBranch :: Branch m b -> (forall a . m a -> m a -> m a) -> m b
-runBranch (Ap Applicative perm m) plus = m <**> runPerm perm plus
-runBranch (Ap Monad perm m) plus = flip ($) `liftM` m `ap` runPerm perm plus
+runBranch (Ap flipAp' perm m) plus = m `flipAp'` runPerm perm plus
 runBranch (Bind m k) plus = m >>= \ a -> runPerm (k a) plus
 runBranch (Lift m) _ = m
 
@@ -92,15 +101,15 @@ Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
 -}
 hoistPerm :: Monad n => (forall a . m a -> n a) -> Perm m b -> Perm n b
 hoistPerm f (Branch m) = Branch (hoistBranch f m)
-hoistPerm f (Plus _ m n) = Plus Unit (hoistPerm f m) (hoistPerm f n)
+hoistPerm f (Plus _ m n) = Plus unit (hoistPerm f m) (hoistPerm f n)
 
 hoistBranch :: Monad n => (forall a . m a -> n a) -> Branch m b -> Branch n b
-hoistBranch f (Ap _ perm m) = Ap Monad (hoistPerm f perm) (f m)
+hoistBranch f (Ap _ perm m) = Ap flipAp (hoistPerm f perm) (f m)
 hoistBranch f (Bind m k) = Bind (f m) (hoistPerm f . k)
 hoistBranch f (Lift m) = Lift (f m)
 
 instance Monoid (m a) => Monoid (Perm m a) where
-  mappend = Plus Unit
+  mappend = (<>)
   mempty = liftPerm mempty
 
 instance Functor m => Functor (Perm m) where
@@ -108,7 +117,7 @@ instance Functor m => Functor (Perm m) where
   fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
 
 instance Functor m => Functor (Branch m) where
-  fmap f (Ap dict perm m) = Ap dict (fmap (f .) perm) m
+  fmap f (Ap flipAp' perm m) = Ap flipAp' (fmap (f .) perm) m
   fmap f (Bind m k) = Bind m (fmap f . k)
   fmap f (Lift m) = Lift (fmap f m)
 
@@ -117,14 +126,14 @@ instance Applicative m => Applicative (Perm m) where
   f <*> a = mapB (`apB` a) f <> mapB (f `apP`) a
 
 apB :: Applicative m => Branch m (a -> b) -> Perm m a -> Branch m b
-Ap dict perm m `apB` a = Ap dict (flipA2 perm a) m
+Ap flipAp' perm m `apB` a = Ap flipAp' (flipA2 perm a) m
 Bind m k `apB` a = Bind m ((<*> a) . k)
-Lift f `apB` a = Ap Applicative (flip ($) <$> a) f
+Lift f `apB` a = Ap (<**>) (flip ($) <$> a) f
 
 apP :: Applicative m => Perm m (a -> b) -> Branch m a -> Branch m b
-f `apP` Ap dict perm m = Ap dict (f .@ perm) m
+f `apP` Ap flipAp' perm m = Ap flipAp' (f .@ perm) m
 f `apP` Bind m k = Bind m ((f <*>) . k)
-f `apP` Lift a = Ap Applicative f a
+f `apP` Lift a = Ap (<**>) f a
 
 flipA2 :: Applicative f => f (a -> b -> c) -> f b -> f (a -> c)
 flipA2 = liftA2 flip
@@ -134,7 +143,7 @@ flipA2 = liftA2 flip
 
 instance Alternative m => Alternative (Perm m) where
   empty = liftPerm empty
-  (<|>) = Plus Alternative
+  (<|>) = Plus alternative
 
 instance Monad m => Monad (Perm m) where
   return = lift . return
@@ -157,27 +166,27 @@ then' :: Monad m => Perm m a -> Perm m b -> Perm m b
 m `then'` n = mapB (`thenB` n) m <> mapB (m `thenP`) n
 
 thenB :: Monad m => Branch m a -> Perm m b -> Branch m b
-Ap dict perm m `thenB` n = Ap dict (perm `then'` liftM' const n) m
+Ap flipAp' perm m `thenB` n = Ap flipAp' (perm `then'` liftM' const n) m
 Bind m k `thenB` n = Bind m ((`then'` n) . k)
-Lift m `thenB` n = Ap Monad (liftM' const n) m
+Lift m `thenB` n = Ap flipAp (liftM' const n) m
 
 thenP :: Monad m => Perm m a -> Branch m b -> Branch m b
-m `thenP` Ap dict perm n = Ap dict (m `then'` perm) n
+m `thenP` Ap flipAp' perm n = Ap flipAp' (m `then'` perm) n
 m `thenP` Bind n k = Bind n ((m `then'`) . k)
-m `thenP` Lift n = Ap Monad (liftM' (flip const) m) n
+m `thenP` Lift n = Ap flipAp (liftM' (flip const) m) n
 
 liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
 liftM' f (Branch m) = Branch (liftB f m)
 liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
 
 liftB :: Monad m => (a -> b) -> Branch m a -> Branch m b
-liftB f (Ap dict perm m) = Ap dict (liftM' (f .) perm) m
+liftB f (Ap flipAp' perm m) = Ap flipAp' (liftM' (f .) perm) m
 liftB f (Bind m k) = Bind m (liftM' f . k)
 liftB f (Lift m) = Lift (liftM f m)
 
 instance MonadPlus m => MonadPlus (Perm m) where
   mzero = lift mzero
-  mplus = Plus MonadPlus
+  mplus = Plus monadPlus
 
 instance MonadTrans Perm where
   lift = Branch . Lift
@@ -213,8 +222,11 @@ instance MonadThrow e m => MonadThrow e (Perm m) where
 
 mapB :: (Branch m a -> Branch m b) -> Perm m a -> Perm m b
 mapB f (Branch m) = Branch (f m)
-mapB f (Plus dict m n) = Plus dict (mapB f m) (mapB f n)
+mapB f (Plus plus m n) = Plus plus (mapB f m) (mapB f n)
 
 infixr 6 <>
 (<>) :: Perm m a -> Perm m a -> Perm m a
-(<>) = Plus Unit
+(<>) = Plus unit
+
+flipAp :: Monad m => m a -> m (a -> b) -> m b
+flipAp a f = flip ($) `liftM` a `ap` f
