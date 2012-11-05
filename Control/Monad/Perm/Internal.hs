@@ -43,7 +43,7 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Maybe (Maybe (Nothing, Just), fromMaybe)
 import Data.Monoid (Monoid (mappend, mempty))
 
-import Prelude (($), (.), const, flip, id, snd)
+import Prelude (($), (.), const, flip, id, snd, uncurry)
 
 -- | The permutation applicative
 data Perm m a where
@@ -143,7 +143,7 @@ instance Applicative m => Applicative (Perm m) where
 apB :: Applicative m => Branch m (a -> b) -> Perm m a -> Branch m b
 Ap flipAp perm m `apB` a = Ap flipAp (flipA2 perm a) m
 Bind m k `apB` a = Bind m ((<*> a) . k)
-Fix f k `apB` n = Fix (\ (a, b) -> f a b) (\ ~(a, _b) -> zipA (k a) n)
+Fix f k `apB` n = Fix (uncurry f) (\ ~(a, _b) -> zipA (k a) n)
 Lift f `apB` a = Ap applicative (flip ($) <$> a) f
 
 apP :: Applicative m => Perm m (a -> b) -> Branch m a -> Branch m b
@@ -162,20 +162,20 @@ instance Alternative m => Alternative (Perm m) where
   empty = liftPerm empty
   (<|>) = Plus alternative
 
-instance MonadFix  m => Monad (Perm m) where
+instance MonadFix m => Monad (Perm m) where
   return = lift . return
   (>>=) = bind
   (>>) = then'
   fail = lift . fail
 
 bind :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-m `bind` k = mapB (`bindB` k) m <> (liftM' snd $ mfix' $ \ ~(a, _b) -> mapB (m `zipP`) $ k a)
+m `bind` k = mapB (`bindB` k) m <> liftM' snd (mfix' $ \ ~(a, _b) -> mapB (m `zipP`) $ k a)
 
 bindB :: MonadFix m => Branch m a -> (a -> Perm m b) -> Branch m b
-Ap _ perm m `bindB` k = Bind m (\ a -> k . ($ a) =<< perm)
+Ap _ perm m `bindB` k = Bind m (\ a -> perm >>= k . ($ a))
 Bind m f `bindB` g = Bind m (f >=> g)
 Fix f k `bindB` k' = Fix snd (\ ~(a, _b) -> k a >>= \ a' -> liftM' ((,) a') (k' (f a')))
-Lift m `bindB` k = m `Bind` k
+Lift m `bindB` k = Bind m k
 
 mfix' :: MonadFix m => (a -> Perm m a) -> Perm m a
 mfix' = Branch . Fix id
@@ -216,7 +216,7 @@ zipB (Lift m) n = Ap monad (liftM' (flip (,)) n) m
 
 zipP :: Monad m => Perm m a -> Branch m b -> Branch m (a, b)
 zipP m (Ap flipAp perm n) = Ap flipAp (liftM' (\ (a, f) b -> (a, f b)) (zipM' m perm)) n
-zipP m (Bind n k) = Bind n (\ a -> zipM' m (k a))
+zipP m (Bind n k) = Bind n (zipM' m . k)
 zipP m (Fix f k) = Fix (fmap f) (\ ~(_a, b) -> zipM' m (k b))
 zipP m (Lift n) = Ap monad (liftM' (,) m) n
 
