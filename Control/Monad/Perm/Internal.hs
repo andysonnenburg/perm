@@ -169,14 +169,14 @@ m `bind` k = mapB (`bindB` k) m <> mapBindP m k
 bindB :: MonadFix m => Branch m a -> (a -> Perm m b) -> Branch m b
 Ap _ f a `bindB` k = Bind f $ \ f' -> a >>= k . f'
 Bind m f `bindB` g = Bind m $ f >=> g
-Fix f k `bindB` k' = Fix snd $ mapB (`bindB` listen (k' . f)) . k . fst
+Fix f k `bindB` k' = Fix snd $ mapB (`bindB` listen' (k' . f)) . k . fst
 Lift m `bindB` k = Bind m k
 
 mapBindP :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
 mapBindP m k = liftM' snd $ mfix' $ \ ~(a, _b) -> mapB (m `zipP`) $ k a
 
-listen :: Monad m => (a -> Perm m b) -> a -> Perm m (a, b)
-listen k a = liftM' ((,) a) $ k a
+listen' :: Monad m => (a -> Perm m b) -> a -> Perm m (a, b)
+listen' m = \ a -> liftM' ((,) a) $ m a
 
 mfix' :: MonadFix m => (a -> Perm m a) -> Perm m a
 mfix' = Branch . Fix id
