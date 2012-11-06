@@ -140,7 +140,7 @@ apR :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
 f `apR` Plus plus m n = Plus plus (f `apR` m) (f `apR` n)
 f `apR` Ap ap g a = Ap ap ((\ g' (f', a') -> f' (g' a')) <$> g) $ zipA f a
 f `apR` Bind m k = Bind m ((f <*>) . k)
-m `apR` Fix f k = Fix (\ (a, b) -> a (f b)) $ \ ~(_a, b) -> zipA m (k b)
+f `apR` Fix g k = Fix (\ (f', b) -> f' (g b)) $ zipA f . k . snd
 f `apR` Lift a = Ap (<*>) (flip ($) <$> a) f
 
 instance Alternative m => Alternative (Perm m) where
@@ -164,7 +164,7 @@ listen' :: Monad m => (a -> Perm m b) -> a -> Perm m (a, b)
 listen' m a = liftM' ((,) a) $ m a
 
 bindR :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-m `bindR` k = liftM' snd $ mfix $ \ ~(a, _b) -> zipR m (k a)
+m `bindR` k = liftM' snd $ mfix $ zipR m . k . fst
 
 liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
 liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
@@ -187,7 +187,7 @@ zipR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
 zipR a (Plus plus m n) = Plus plus (zipR a m) (zipR a n)
 zipR a (Ap ap f b) = Ap ap (liftM fmap f) $ zipM' a b
 zipR m (Bind n k) = Bind n $ zipM' m . k
-zipR m (Fix f k) = Fix (fmap f) $ \ ~(_a, b) -> zipR m (k b)
+zipR m (Fix f k) = Fix (fmap f) $ zipR m . k . snd
 zipR m (Lift n) = Ap monad (liftM (flip (,)) n) m
 
 instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
