@@ -43,3 +43,17 @@ library
     MultiParamTypeClasses
     Rank2Types
     UndecidableInstances
+
+test-suite reddit-tests
+  default-language: Haskell98
+  hs-source-dirs: tests
+  main-is: RedditTests.hs
+  type: exitcode-stdio-1.0
+  build-depends:
+    base,
+    mtl,
+    HUnit,
+    test-framework >= 0.3.3,
+    test-framework-hunit,
+    perm
+  ghc-options: -Wall

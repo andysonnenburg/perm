@@ -44,7 +44,7 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Maybe (Maybe (Nothing, Just), fromMaybe)
 import Data.Monoid (Monoid (mappend, mempty))
 
-import Prelude (($), (.), const, flip, fst, id, snd, uncurry)
+import Prelude (($), (.), flip, fst, id, snd, uncurry)
 
 -- | The permutation applicative
 data Perm m a where
@@ -149,12 +149,9 @@ instance Alternative m => Alternative (Perm m) where
 
 instance MonadFix m => Monad (Perm m) where
   return = lift . return
-  (>>=) = bind
+  m >>= k = m `bindL` k <> m `bindR` k
   m >> n = liftM' snd $ zipM' m n
   fail = lift . fail
-
-bind :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-m `bind` k = m `bindL` k <> m `bindR` k
 
 bindL :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
 Plus plus m n `bindL` k = Plus plus (m `bindL` k) (n `bindL` k)
@@ -167,10 +164,7 @@ listen' :: Monad m => (a -> Perm m b) -> a -> Perm m (a, b)
 listen' m a = liftM' ((,) a) $ m a
 
 bindR :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-m `bindR` k = liftM' snd $ mfix' $ \ ~(a, _b) -> zipR m (k a)
-
-mfix' :: MonadFix m => (a -> Perm m a) -> Perm m a
-mfix' = Fix id
+m `bindR` k = liftM' snd $ mfix $ \ ~(a, _b) -> zipR m (k a)
 
 liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
 liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
@@ -201,7 +195,7 @@ instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
   mplus = Plus monadPlus
 
 instance MonadFix m => MonadFix (Perm m) where
-  mfix = mfix'
+  mfix = Fix id
 
 instance MonadTrans Perm where
   lift = Lift
@@ -211,17 +205,14 @@ instance (MonadFix m, MonadIO m) => MonadIO (Perm m) where
 
 instance (MonadFix m, MonadReader r m) => MonadReader r (Perm m) where
   ask = lift ask
-  local = local'
+  local f (Plus plus m n) = Plus plus (local f m) (local f n)
+  local f (Ap ap g a) = Ap ap (local f g) (local f a)
+  local f (Bind m k) = Bind (local f m) (local f . k)
+  local f (Fix g k) = Fix g $ local f . k
+  local f (Lift m) = Lift $ local f m
 #if MIN_VERSION_mtl(2, 1, 0)
   reader = lift . reader
 #endif
-
-local' :: (MonadFix m, MonadReader r m) => (r -> r) -> Perm m a -> Perm m a
-local' f (Plus plus m n) = Plus plus (local' f m) (local' f n)
-local' f (Ap ap g a) = Ap ap (local f g) (local' f a)
-local' f (Bind m k) = Bind (local f m) (local' f . k)
-local' f (Fix g k) = Fix g $ local' f . k
-local' f (Lift m) = Lift $ local f m
 
 instance (MonadFix m, MonadState s m) => MonadState s (Perm m) where
   get = lift get
