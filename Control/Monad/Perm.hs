@@ -9,6 +9,7 @@ module Control.Monad.Perm
        ( Perm
        , runPerm
        , liftPerm
+       , liftPlus
        , hoistPerm
        ) where
 
@@ -16,6 +17,7 @@ import Control.Monad
 import Control.Monad.Perm.Internal (Perm,
                                     sum1M,
                                     liftPerm,
+                                    liftPlus,
                                     hoistPerm)
 
 -- | Unwrap a 'Perm', combining actions using the 'MonadPlus' for @f@.
