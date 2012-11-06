@@ -6,8 +6,8 @@ Stability: experimental
 Portability: non-portable
 -}
 module Control.Monad.Perm
-       ( PermT
-       , runPermT
+       ( Perm
+       , runPerm
        , liftPerm
        , hoistPerm
        ) where
@@ -18,9 +18,6 @@ import Control.Monad.Perm.Internal (Perm,
                                     liftPerm,
                                     hoistPerm)
 
--- | The permutation monad
-type PermT = Perm
-
 -- | Unwrap a 'Perm', combining actions using the 'MonadPlus' for @f@.
-runPermT :: MonadPlus m => PermT m a -> m a
-runPermT = sum1M
+runPerm :: MonadPlus m => Perm m a -> m a
+runPerm = sum1M

@@ -227,6 +227,9 @@ instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
   mzero = lift mzero
   mplus = Plus monadPlus
 
+instance MonadFix m => MonadFix (Perm m) where
+  mfix = mfix'
+
 instance MonadTrans Perm where
   lift = Branch . Lift
 
