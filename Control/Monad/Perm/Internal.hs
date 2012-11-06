@@ -150,7 +150,7 @@ instance Alternative m => Alternative (Perm m) where
 instance MonadFix m => Monad (Perm m) where
   return = lift . return
   (>>=) = bind
-  (>>) = then'
+  m >> n = liftM' snd $ zipM' m n
   fail = lift . fail
 
 bind :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
@@ -171,23 +171,6 @@ m `bindR` k = liftM' snd $ mfix' $ \ ~(a, _b) -> zipR m (k a)
 
 mfix' :: MonadFix m => (a -> Perm m a) -> Perm m a
 mfix' = Fix id
-
-then' :: Monad m => Perm m a -> Perm m b -> Perm m b
-m `then'` n = m `thenL` n <> m `thenR` n
-
-thenL :: Monad m => Perm m a -> Perm m b -> Perm m b
-Plus plus m n `thenL` b = Plus plus (m `thenL` b) (n `thenL` b)
-Ap ap f a `thenL` b = Ap ap (liftM (\ _f' (_a', b') -> b') f) $ zipM' a b
-Bind m k `thenL` n = Bind m ((`then'` n) . k)
-Fix _ k `thenL` n = Fix snd $ \ ~(a, _b) -> zipL (k a) n
-Lift m `thenL` n = Ap monad (liftM (flip const) m) n
-
-thenR :: Monad m => Perm m a -> Perm m b -> Perm m b
-a `thenR` Plus plus m n = Plus plus (a `thenR` m) (a `thenR` n)
-a `thenR` Ap ap f b = Ap ap f $ a `then'` b
-m `thenR` Bind n k = Bind n ((m `then'`) . k)
-m `thenR` Fix f k = Fix f $ \ a -> m `thenR` k a
-m `thenR` Lift n = Ap monad (liftM const n) m
 
 liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
 liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
