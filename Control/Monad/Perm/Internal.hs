@@ -48,14 +48,11 @@ import Prelude (($), (.), const, flip, fst, id, snd, uncurry)
 
 -- | The permutation applicative
 data Perm m a where
-  Branch :: Branch m a -> Perm m a
   Plus :: PlusDict m -> Perm m a -> Perm m a -> Perm m a
-
-data Branch m a where
-  Ap :: ApDict m -> m (a -> b) -> Perm m a -> Branch m b
-  Bind :: Monad m => m a -> (a -> Perm m b) -> Branch m b
-  Fix :: MonadFix m => (a -> b) -> (a -> Perm m a) -> Branch m b
-  Lift :: m a -> Branch m a
+  Ap :: ApDict m -> m (a -> b) -> Perm m a -> Perm m b
+  Bind :: Monad m => m a -> (a -> Perm m b) -> Perm m b
+  Fix :: MonadFix m => (a -> b) -> (a -> Perm m a) -> Perm m b
+  Lift :: m a -> Perm m a
 
 newtype PlusDict m =
   PlusDict { getPlusDict :: forall a . Maybe (m a -> m a -> m a)
@@ -92,18 +89,15 @@ sum1M :: MonadPlus m => Perm m a -> m a
 sum1M m = runPerm m mplus
 
 runPerm :: Perm m b -> (forall a . m a -> m a -> m a) -> m b
-runPerm (Branch m) plus = runBranch m plus
 runPerm (Plus x m n) d = fromPlusDict d x (runPerm m d) (runPerm n d)
-
-runBranch :: Branch m b -> (forall a . m a -> m a -> m a) -> m b
-runBranch (Ap ap f a) plus = f `ap` runPerm a plus
-runBranch (Bind m k) plus = m >>= \ a -> runPerm (k a) plus
-runBranch (Fix f k) plus = liftM f $ mfix $ \ a -> runPerm (k a) plus
-runBranch (Lift m) _ = m
+runPerm (Ap ap f a) plus = f `ap` runPerm a plus
+runPerm (Bind m k) plus = m >>= \ a -> runPerm (k a) plus
+runPerm (Fix f k) plus = liftM f $ mfix $ \ a -> runPerm (k a) plus
+runPerm (Lift m) _ = m
 
 -- | A version of 'lift' that can be used without a 'Monad' for @m@.
 liftPerm :: m a -> Perm m a
-liftPerm = Branch . Lift
+liftPerm = Lift
 
 liftPlus :: (forall a . m a -> m a -> m a) ->
             Perm m b -> Perm m b -> Perm m b
@@ -114,44 +108,40 @@ Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
 @'Perm' m@ to @'Perm' n@.
 -}
 hoistPerm :: MonadFix n => (forall a . m a -> n a) -> Perm m b -> Perm n b
-hoistPerm f (Branch m) = Branch (hoistBranch f m)
 hoistPerm f (Plus _ m n) = Plus unit (hoistPerm f m) (hoistPerm f n)
-
-hoistBranch :: MonadFix n => (forall a . m a -> n a) -> Branch m b -> Branch n b
-hoistBranch f (Ap _ g a) = Ap monad (f g) (hoistPerm f a)
-hoistBranch f (Bind m k) = Bind (f m) (hoistPerm f . k)
-hoistBranch f (Fix g k) = Fix g (hoistPerm f . k)
-hoistBranch f (Lift m) = Lift (f m)
+hoistPerm f (Ap _ g a) = Ap monad (f g) (hoistPerm f a)
+hoistPerm f (Bind m k) = Bind (f m) (hoistPerm f . k)
+hoistPerm f (Fix g k) = Fix g (hoistPerm f . k)
+hoistPerm f (Lift m) = Lift (f m)
 
 instance Monoid (m a) => Monoid (Perm m a) where
   mappend = (<>)
   mempty = liftPerm mempty
 
 instance Functor m => Functor (Perm m) where
-  fmap f (Branch m) = Branch (fmap f m)
   fmap f (Plus dict m n) = Plus dict (fmap f m) (fmap f n)
-
-instance Functor m => Functor (Branch m) where
-  fmap f (Ap flipAp perm m) = Ap flipAp (fmap (f .) perm) m
+  fmap f (Ap ap g a) = Ap ap (fmap (f .) g) a
   fmap f (Bind m k) = Bind m (fmap f . k)
   fmap f (Fix g k) = Fix (f . g) k
   fmap f (Lift m) = Lift (fmap f m)
 
 instance Applicative m => Applicative (Perm m) where
   pure = liftPerm . pure
-  f <*> a = mapB (`apB` a) f <> mapB (f `apP`) a
+  f <*> a = f `apL` a <> f `apR` a
 
-apB :: Applicative m => Branch m (a -> b) -> Perm m a -> Branch m b
-Ap ap f a `apB` b = Ap ap ((\ f' (a', b') -> f' a' b') <$> f) $ zipA a b
-Bind m k `apB` a = Bind m ((<*> a) . k)
-Fix f k `apB` n = Fix (uncurry f) $ \ ~(a, _b) -> zipA (k a) n
-Lift f `apB` a = Ap applicative f a
+apL :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
+Plus plus m n `apL` a = Plus plus (m `apL` a) (n `apL` a)
+Ap ap f a `apL` b = Ap ap ((\ f' (a', b') -> f' a' b') <$> f) $ zipA a b
+Bind m k `apL` a = Bind m ((<*> a) . k)
+Fix f k `apL` n = Fix (uncurry f) $ \ ~(a, _b) -> zipA (k a) n
+Lift f `apL` a = Ap applicative f a
 
-apP :: Applicative m => Perm m (a -> b) -> Branch m a -> Branch m b
-f `apP` Ap ap g a = Ap ap ((\ g' (f', a') -> f' (g' a')) <$> g) $ zipA f a
-f `apP` Bind m k = Bind m ((f <*>) . k)
-m `apP` Fix f k = Fix (\ (a, b) -> a (f b)) $ \ ~(_a, b) -> zipA m (k b)
-f `apP` Lift a = Ap (<*>) (flip ($) <$> a) f
+apR :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
+f `apR` Plus plus m n = Plus plus (f `apR` m) (f `apR` n)
+f `apR` Ap ap g a = Ap ap ((\ g' (f', a') -> f' (g' a')) <$> g) $ zipA f a
+f `apR` Bind m k = Bind m ((f <*>) . k)
+m `apR` Fix f k = Fix (\ (a, b) -> a (f b)) $ \ ~(_a, b) -> zipA m (k b)
+f `apR` Lift a = Ap (<*>) (flip ($) <$> a) f
 
 instance Alternative m => Alternative (Perm m) where
   empty = liftPerm empty
@@ -164,62 +154,64 @@ instance MonadFix m => Monad (Perm m) where
   fail = lift . fail
 
 bind :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-m `bind` k = mapB (`bindB` k) m <> mapBindP m k
+m `bind` k = m `bindL` k <> m `bindR` k
 
-bindB :: MonadFix m => Branch m a -> (a -> Perm m b) -> Branch m b
-Ap _ f a `bindB` k = Bind f $ \ f' -> a >>= k . f'
-Bind m f `bindB` g = Bind m $ f >=> g
-Fix f k `bindB` k' = Fix snd $ mapB (`bindB` listen' (k' . f)) . k . fst
-Lift m `bindB` k = Bind m k
-
-mapBindP :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-mapBindP m k = liftM' snd $ mfix' $ \ ~(a, _b) -> mapB (m `zipP`) $ k a
+bindL :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
+Plus plus m n `bindL` k = Plus plus (m `bindL` k) (n `bindL` k)
+Ap _ f a `bindL` k = Bind f $ \ f' -> a >>= k . f'
+Bind m f `bindL` g = Bind m $ f >=> g
+Fix f k `bindL` k' = Fix snd $ (`bindL` listen' (k' . f)) . k . fst
+Lift m `bindL` k = Bind m k
 
 listen' :: Monad m => (a -> Perm m b) -> a -> Perm m (a, b)
-listen' m = \ a -> liftM' ((,) a) $ m a
+listen' m a = liftM' ((,) a) $ m a
+
+bindR :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
+m `bindR` k = liftM' snd $ mfix' $ \ ~(a, _b) -> zipR m (k a)
 
 mfix' :: MonadFix m => (a -> Perm m a) -> Perm m a
-mfix' = Branch . Fix id
+mfix' = Fix id
 
 then' :: Monad m => Perm m a -> Perm m b -> Perm m b
-m `then'` n = mapB (`thenB` n) m <> mapB (m `thenP`) n
+m `then'` n = m `thenL` n <> m `thenR` n
 
-thenB :: Monad m => Branch m a -> Perm m b -> Branch m b
-Ap ap f a `thenB` b = Ap ap (liftM (\ _f' (_a', b') -> b') f) $ zipM' a b
-Bind m k `thenB` n = Bind m ((`then'` n) . k)
-Fix _ k `thenB` n = Fix snd $ \ ~(a, _b) -> mapB (`zipB` n) (k a)
-Lift m `thenB` n = Ap monad (liftM (flip const) m) n
+thenL :: Monad m => Perm m a -> Perm m b -> Perm m b
+Plus plus m n `thenL` b = Plus plus (m `thenL` b) (n `thenL` b)
+Ap ap f a `thenL` b = Ap ap (liftM (\ _f' (_a', b') -> b') f) $ zipM' a b
+Bind m k `thenL` n = Bind m ((`then'` n) . k)
+Fix _ k `thenL` n = Fix snd $ \ ~(a, _b) -> zipL (k a) n
+Lift m `thenL` n = Ap monad (liftM (flip const) m) n
 
-thenP :: Monad m => Perm m a -> Branch m b -> Branch m b
-a `thenP` Ap ap f b = Ap ap f $ a `then'` b
-m `thenP` Bind n k = Bind n ((m `then'`) . k)
-m `thenP` Fix f k = Fix f $ \ a -> mapB (m `thenP`) (k a)
-m `thenP` Lift n = Ap monad (liftM const n) m
+thenR :: Monad m => Perm m a -> Perm m b -> Perm m b
+a `thenR` Plus plus m n = Plus plus (a `thenR` m) (a `thenR` n)
+a `thenR` Ap ap f b = Ap ap f $ a `then'` b
+m `thenR` Bind n k = Bind n ((m `then'`) . k)
+m `thenR` Fix f k = Fix f $ \ a -> m `thenR` k a
+m `thenR` Lift n = Ap monad (liftM const n) m
 
 liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
-liftM' f (Branch m) = Branch (liftB f m)
 liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
-
-liftB :: Monad m => (a -> b) -> Branch m a -> Branch m b
-liftB f (Ap ap g a) = Ap ap (liftM (f .) g) a
-liftB f (Bind m k) = Bind m (liftM' f . k)
-liftB f (Fix g k) = Fix (f . g) k
-liftB f (Lift m) = Lift (liftM f m)
+liftM' f (Ap ap g a) = Ap ap (liftM (f .) g) a
+liftM' f (Bind m k) = Bind m (liftM' f . k)
+liftM' f (Fix g k) = Fix (f . g) k
+liftM' f (Lift m) = Lift (liftM f m)
 
 zipM' :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
-zipM' m n = mapB (`zipB` n) m <> mapB (m `zipP`) n
+zipM' m n = zipL m n <> zipR m n
 
-zipB :: Monad m => Branch m a -> Perm m b -> Branch m (a, b)
-zipB (Ap ap f a) b = Ap ap (liftM (\ f' (a', b') -> (f' a', b')) f) $ zipM' a b
-zipB (Bind m k) n = Bind m $ \ a -> zipM' (k a) n
-zipB (Fix f k) n = Fix (mapFst f) $ \ ~(a, _b) -> mapB (`zipB` n) $ k a
-zipB (Lift m) n = Ap monad (liftM (,) m) n
+zipL :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
+zipL (Plus plus m n) b = Plus plus (zipL m b) (zipL n b)
+zipL (Ap ap f a) b = Ap ap (liftM (\ f' (a', b') -> (f' a', b')) f) $ zipM' a b
+zipL (Bind m k) n = Bind m $ \ a -> zipM' (k a) n
+zipL (Fix f k) n = Fix (mapFst f) $ \ ~(a, _b) -> zipL (k a) n
+zipL (Lift m) n = Ap monad (liftM (,) m) n
 
-zipP :: Monad m => Perm m a -> Branch m b -> Branch m (a, b)
-zipP a (Ap ap f b) = Ap ap (liftM (\ f' (a', b') -> (a', f' b')) f) $ zipM' a b
-zipP m (Bind n k) = Bind n $ zipM' m . k
-zipP m (Fix f k) = Fix (fmap f) $ \ ~(_a, b) -> mapB (m `zipP`) $ k b
-zipP m (Lift n) = Ap monad (liftM (flip (,)) n) m
+zipR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
+zipR a (Plus plus m n) = Plus plus (zipR a m) (zipR a n)
+zipR a (Ap ap f b) = Ap ap (liftM (\ f' (a', b') -> (a', f' b')) f) $ zipM' a b
+zipR m (Bind n k) = Bind n $ zipM' m . k
+zipR m (Fix f k) = Fix (fmap f) $ \ ~(_a, b) -> zipR m (k b)
+zipR m (Lift n) = Ap monad (liftM (flip (,)) n) m
 
 instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
   mzero = lift mzero
@@ -229,24 +221,24 @@ instance MonadFix m => MonadFix (Perm m) where
   mfix = mfix'
 
 instance MonadTrans Perm where
-  lift = Branch . Lift
+  lift = Lift
 
 instance (MonadFix m, MonadIO m) => MonadIO (Perm m) where
   liftIO = lift . liftIO
 
 instance (MonadFix m, MonadReader r m) => MonadReader r (Perm m) where
   ask = lift ask
-  local f = mapB (localBranch f)
+  local = local'
 #if MIN_VERSION_mtl(2, 1, 0)
   reader = lift . reader
 #endif
 
-localBranch :: (MonadFix m, MonadReader r m) =>
-               (r -> r) -> Branch m a -> Branch m a
-localBranch f (Ap flipAp perm m) = Ap flipAp (local f perm) (local f m)
-localBranch f (Bind m k) = Bind (local f m) (local f . k)
-localBranch f (Fix g k) = Fix g $ local f . k
-localBranch f (Lift m) = Lift $ local f m
+local' :: (MonadFix m, MonadReader r m) => (r -> r) -> Perm m a -> Perm m a
+local' f (Plus plus m n) = Plus plus (local' f m) (local' f n)
+local' f (Ap ap g a) = Ap ap (local f g) (local' f a)
+local' f (Bind m k) = Bind (local f m) (local' f . k)
+local' f (Fix g k) = Fix g $ local' f . k
+local' f (Lift m) = Lift $ local f m
 
 instance (MonadFix m, MonadState s m) => MonadState s (Perm m) where
   get = lift get
@@ -261,10 +253,6 @@ instance (MonadFix m, MonadThrow e m) => MonadThrow e (Perm m)
 instance (MonadFix m, MonadThrow e m) => MonadThrow e (Perm m) where
   throw = lift . throw
 #endif
-
-mapB :: (Branch m a -> Branch m b) -> Perm m a -> Perm m b
-mapB f (Branch m) = Branch $ f m
-mapB f (Plus plus m n) = Plus plus (mapB f m) (mapB f n)
 
 infixr 6 <>
 (<>) :: Perm m a -> Perm m a -> Perm m a
