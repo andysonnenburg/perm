@@ -177,17 +177,16 @@ liftM' f (Bind m k) = Bind m (liftM' f . k)
 liftM' f (Fix k) = Fix $ liftM' (second f) . k
 liftM' f (Lift m) = Lift (liftM f m)
 
-zipM' :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
+zipM', zipML, zipMR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
+
 zipM' m n = zipML m n <> zipMR m n
 
-zipML :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
 zipML (Plus plus m n) b = Plus plus (zipML m b) (zipML n b)
 zipML (Ap ap f a) b = Ap ap (liftM mapFst f) $ zipM' a b
 zipML (Bind m k) n = Bind m $ \ a -> zipM' (k a) n
 zipML (Fix k) n = Fix $ \ a0 -> liftM' (\ ((a1, a'), b') -> (a1, (a', b'))) $ zipML (k a0) n
 zipML (Lift m) n = Ap monad (liftM (,) m) n
 
-zipMR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
 zipMR a (Plus plus m n) = Plus plus (zipMR a m) (zipMR a n)
 zipMR a (Ap ap f b) = Ap ap (liftM fmap f) $ zipM' a b
 zipMR m (Bind n k) = Bind n $ zipM' m . k
