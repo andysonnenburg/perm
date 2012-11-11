@@ -128,21 +128,26 @@ instance Functor m => Functor (Perm m) where
 
 instance Applicative m => Applicative (Perm m) where
   pure = liftPerm . pure
-  f <*> a = f `apL` a <> f `apR` a
+  f <*> a = (f `apL` a) <> (f `apR` a)
 
-apL :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
+infixl 4 `apL`, `apR`
+apL, apR :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
+
 Plus plus m n `apL` a = Plus plus (m `apL` a) (n `apL` a)
 Ap ap f a `apL` b = Ap ap (uncurry <$> f) $ zipA a b
 Bind m k `apL` a = Bind m ((<*> a) . k)
-Fix k `apL` n = Fix $ \ a -> liftM' (\ ((a, f), a') -> (a, f a')) $ zipA (k a) n
+Fix k `apL` n = Fix $ \ a0 -> (\ ((a1, f'), a') -> (a1, f' a')) <$> zipAL (k a0) n
 Lift f `apL` a = Ap applicative f a
 
-apR :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
 f `apR` Plus plus m n = Plus plus (f `apR` m) (f `apR` n)
 f `apR` Ap ap g a = Ap ap ((\ g' (f', a') -> f' (g' a')) <$> g) $ zipA f a
 f `apR` Bind m k = Bind m ((f <*>) . k)
-f `apR` Fix k = Fix $ liftM' (\ (f', (a, a')) -> (a, f' a')) . zipA f . k
+f `apR` Fix k = Fix $ fmap (\ (f', (a1, a')) -> (a1, f' a')) . zipAR f . k
 f `apR` Lift a = Ap (<*>) (flip ($) <$> a) f
+
+zipAL, zipAR :: Applicative m => Perm m a -> Perm m b -> Perm m (a, b)
+zipAL a b = (,) <$> a `apL` b
+zipAR a b = (,) <$> a `apR` b
 
 instance Alternative m => Alternative (Perm m) where
   empty = liftPerm empty
@@ -150,19 +155,20 @@ instance Alternative m => Alternative (Perm m) where
 
 instance MonadFix m => Monad (Perm m) where
   return = lift . return
-  m >>= k = m `bindL` k <> m `bindR` k
+  m >>= k = (m `bindL` k) <> (m `bindR` k)
   m >> n = liftM' snd $ zipM' m n
   fail = lift . fail
 
-bindL :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
+infixl 1 `bindL`, `bindR`
+bindL, bindR :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
+
 Plus plus m n `bindL` k = Plus plus (m `bindL` k) (n `bindL` k)
 Ap _ f a `bindL` k = Bind f $ \ f' -> a >>= k . f'
 Bind m f `bindL` g = Bind m $ f >=> g
-Fix k `bindL` k' = Fix $ \ a -> k a `bindL` \ (a, a') -> liftM' (\ b -> (a, b)) $ k' a'
+Fix k `bindL` k' = Fix $ \ a0 -> k a0 `bindL` \ (a1, a') -> liftM' (\ b -> (a1, b)) $ k' a'
 Lift m `bindL` k = Bind m k
 
-bindR :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
-m `bindR` k = liftM' snd $ mfix $ zipR m . k . fst
+m `bindR` k = liftM' snd $ mfix $ zipMR m . k . fst
 
 liftM' :: Monad m => (a -> b) -> Perm m a -> Perm m b
 liftM' f (Plus dict m n) = Plus dict (liftM' f m) (liftM' f n)
@@ -172,21 +178,21 @@ liftM' f (Fix k) = Fix $ liftM' (second f) . k
 liftM' f (Lift m) = Lift (liftM f m)
 
 zipM' :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
-zipM' m n = zipL m n <> zipR m n
+zipM' m n = zipML m n <> zipMR m n
 
-zipL :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
-zipL (Plus plus m n) b = Plus plus (zipL m b) (zipL n b)
-zipL (Ap ap f a) b = Ap ap (liftM mapFst f) $ zipM' a b
-zipL (Bind m k) n = Bind m $ \ a -> zipM' (k a) n
-zipL (Fix k) n = Fix $ \ a -> liftM' (\ ((a', a), b) -> (a', (a, b))) $ zipL (k a) n
-zipL (Lift m) n = Ap monad (liftM (,) m) n
+zipML :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
+zipML (Plus plus m n) b = Plus plus (zipML m b) (zipML n b)
+zipML (Ap ap f a) b = Ap ap (liftM mapFst f) $ zipM' a b
+zipML (Bind m k) n = Bind m $ \ a -> zipM' (k a) n
+zipML (Fix k) n = Fix $ \ a0 -> liftM' (\ ((a1, a'), b') -> (a1, (a', b'))) $ zipML (k a0) n
+zipML (Lift m) n = Ap monad (liftM (,) m) n
 
-zipR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
-zipR a (Plus plus m n) = Plus plus (zipR a m) (zipR a n)
-zipR a (Ap ap f b) = Ap ap (liftM fmap f) $ zipM' a b
-zipR m (Bind n k) = Bind n $ zipM' m . k
-zipR m (Fix k) = Fix $ liftM' (\ (a, (a', b)) -> (a', (a, b))) . zipR m . k
-zipR m (Lift n) = Ap monad (liftM (flip (,)) n) m
+zipMR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
+zipMR a (Plus plus m n) = Plus plus (zipMR a m) (zipMR a n)
+zipMR a (Ap ap f b) = Ap ap (liftM fmap f) $ zipM' a b
+zipMR m (Bind n k) = Bind n $ zipM' m . k
+zipMR m (Fix k) = Fix $ liftM' (\ (a, (a', b)) -> (a', (a, b))) . zipMR m . k
+zipMR m (Lift n) = Ap monad (liftM (flip (,)) n) m
 
 instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
   mzero = lift mzero
