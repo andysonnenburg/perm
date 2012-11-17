@@ -29,9 +29,9 @@ import Control.Arrow (second)
 import Control.Monad hiding (ap)
 import qualified Control.Monad as Monad (ap)
 #if LANGUAGE_DefaultSignatures
-import Control.Monad.Catch.Class (MonadThrow)
+import Control.Monad.Catch.Class (MonadCatch (catch), MonadThrow)
 #else
-import Control.Monad.Catch.Class (MonadThrow (throw))
+import Control.Monad.Catch.Class (MonadCatch (catch), MonadThrow (throw))
 #endif
 import Control.Monad.Cont.Class (MonadCont (callCC))
 import Control.Monad.Error.Class (MonadError (catchError, throwError))
@@ -220,6 +220,11 @@ instance MonadTrans Perm where
 
 instance (MonadFix m, MonadIO m) => MonadIO (Perm m) where
   liftIO = lift . liftIO
+
+instance (MonadFix m, MonadPlus m,
+          MonadFix n, MonadPlus n,
+          MonadCatch e m n) => MonadCatch e (Perm m) (Perm n) where
+  m `catch` h = lift $ sum1M m `catch` (sum1M . h)
 
 instance (MonadFix m, MonadPlus m, MonadCont m) => MonadCont (Perm m) where
   callCC f = lift $ callCC $ \ c -> sum1M (f (lift . c))
