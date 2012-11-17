@@ -10,6 +10,7 @@ module Control.Applicative.Perm
        , runPerm
        , liftPerm
        , liftPlus
+       , liftAp
        , hoistPerm
        ) where
 
@@ -18,6 +19,7 @@ import Control.Monad.Perm.Internal (Perm,
                                     sum1,
                                     liftPerm,
                                     liftPlus,
+                                    liftAp,
                                     hoistPerm)
 
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.

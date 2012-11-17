@@ -4,6 +4,7 @@
   , GADTs
   , MultiParamTypeClasses
   , Rank2Types
+  , ScopedTypeVariables
   , UndecidableInstances #-}
 {- |
 Copyright: Andy Sonnenburg (c) 2012
@@ -19,6 +20,7 @@ module Control.Monad.Perm.Internal
        , sum1M
        , liftPerm
        , liftPlus
+       , liftAp
        , hoistPerm
        ) where
 
@@ -31,9 +33,11 @@ import Control.Monad.Catch.Class (MonadThrow)
 #else
 import Control.Monad.Catch.Class (MonadThrow (throw))
 #endif
+import Control.Monad.Cont.Class (MonadCont (callCC))
+import Control.Monad.Error.Class (MonadError (catchError, throwError))
 import Control.Monad.Fix (MonadFix (mfix))
 import Control.Monad.IO.Class (MonadIO (liftIO))
-#if MIN_VERSION_mtl(2, 1, 0)
+#if MIN_VERSION_mtl (2, 1, 0)
 import Control.Monad.Reader.Class (MonadReader (ask, local, reader))
 import Control.Monad.State.Class (MonadState (get, put, state))
 #else
@@ -41,8 +45,13 @@ import Control.Monad.Reader.Class (MonadReader (ask, local))
 import Control.Monad.State.Class (MonadState (get, put))
 #endif
 import Control.Monad.Trans.Class (MonadTrans (lift))
+#if MIN_VERSION_mtl (2, 1, 0)
+import Control.Monad.Writer.Class (MonadWriter (listen, pass, tell, writer))
+#else
+import Control.Monad.Writer.Class (MonadWriter (listen, pass, tell))
+#endif
 
-import Data.Maybe (Maybe (Nothing, Just), fromMaybe)
+import Data.Maybe (Maybe (Just, Nothing), fromMaybe)
 import Data.Monoid (Monoid (mappend, mempty))
 
 import Prelude (($), (.), flip, fst, id, snd, uncurry)
@@ -75,12 +84,6 @@ unit = PlusDict Nothing
 
 type ApDict m = forall a b . m (a -> b) -> m a -> m b
 
-applicative :: Applicative m => ApDict m
-applicative = (<*>)
-
-monad :: Monad m => ApDict m
-monad = Monad.ap
-
 -- | Unwrap a 'Perm', combining actions using the 'Alternative' for @f@.
 sum1 :: Alternative m => Perm m a -> m a
 sum1 m = runPerm m (<|>)
@@ -110,7 +113,7 @@ Lift a monad homomorphism from @m@ to @n@ into a monad homomorphism from
 -}
 hoistPerm :: MonadFix n => (forall a . m a -> n a) -> Perm m b -> Perm n b
 hoistPerm f (Plus _ m n) = Plus unit (hoistPerm f m) (hoistPerm f n)
-hoistPerm f (Ap _ g a) = Ap monad (f g) (hoistPerm f a)
+hoistPerm f (Ap _ g a) = Ap Monad.ap (f g) (hoistPerm f a)
 hoistPerm f (Bind m k) = Bind (f m) (hoistPerm f . k)
 hoistPerm f (Fix k) = Fix $ hoistPerm f . k
 hoistPerm f (Lift m) = Lift (f m)
@@ -128,26 +131,38 @@ instance Functor m => Functor (Perm m) where
 
 instance Applicative m => Applicative (Perm m) where
   pure = liftPerm . pure
-  f <*> a = (f `apL` a) <> (f `apR` a)
+  (<*>) = liftAp (<*>)
 
-infixl 4 `apL`, `apR`
-apL, apR :: Applicative m => Perm m (a -> b) -> Perm m a -> Perm m b
+liftAp :: forall c d m .
+          Functor m =>
+          (forall a b . m (a -> b) -> m a -> m b) ->
+          Perm m (c -> d) -> Perm m c -> Perm m d
+liftAp ap' = ap
+  where
+    infixl 4 `ap`, `apL`, `apR`
+    ap, apL, apR :: Perm m (a -> b) -> Perm m a -> Perm m b
 
-Plus plus m n `apL` a = Plus plus (m `apL` a) (n `apL` a)
-Ap ap f a `apL` b = Ap ap (uncurry <$> f) $ zipA a b
-Bind m k `apL` a = Bind m ((<*> a) . k)
-Fix k `apL` n = Fix $ \ a0 -> (\ ((a1, f'), a') -> (a1, f' a')) <$> zipAL (k a0) n
-Lift f `apL` a = Ap applicative f a
+    f `ap` a = (f `apL` a) <> (f `apR` a)
 
-f `apR` Plus plus m n = Plus plus (f `apR` m) (f `apR` n)
-f `apR` Ap ap g a = Ap ap ((\ g' (f', a') -> f' (g' a')) <$> g) $ zipA f a
-f `apR` Bind m k = Bind m ((f <*>) . k)
-f `apR` Fix k = Fix $ fmap (\ (f', (a1, a')) -> (a1, f' a')) . zipAR f . k
-f `apR` Lift a = Ap (<*>) (flip ($) <$> a) f
+    Plus dict m n `apL` a = Plus dict (m `apL` a) (n `apL` a)
+    Ap dict f a `apL` b = Ap dict (uncurry <$> f) $ zipA a b
+    Bind m k `apL` a = Bind m ((`ap` a) . k)
+    Fix k `apL` n = Fix $ \ a0 -> (\ ((a1, f'), a') -> (a1, f' a')) <$> zipAL (k a0) n
+    Lift f `apL` a = Ap ap' f a
 
-zipAL, zipAR :: Applicative m => Perm m a -> Perm m b -> Perm m (a, b)
-zipAL a b = (,) <$> a `apL` b
-zipAR a b = (,) <$> a `apR` b
+    f `apR` Plus dict m n = Plus dict (f `apR` m) (f `apR` n)
+    f `apR` Ap dict g a = Ap dict ((\ g' (f', a') -> f' (g' a')) <$> g) $ zipA f a
+    f `apR` Bind m k = Bind m ((f `ap`) . k)
+    f `apR` Fix k = Fix $ \ a0 -> (\ (f', (a1, a')) -> (a1, f' a')) <$> zipAR f (k a0)
+    f `apR` Lift a = Ap ap' (flip ($) <$> a) f
+
+    zipA, zipAL, zipAR :: Perm m a -> Perm m b -> Perm m (a, b)
+
+    zipA a b = (,) <$> a `ap` b
+
+    zipAL a b = (,) <$> a `apL` b
+
+    zipAR a b = (,) <$> a `apR` b
 
 instance Alternative m => Alternative (Perm m) where
   empty = liftPerm empty
@@ -162,10 +177,10 @@ instance MonadFix m => Monad (Perm m) where
 infixl 1 `bindL`, `bindR`
 bindL, bindR :: MonadFix m => Perm m a -> (a -> Perm m b) -> Perm m b
 
-Plus plus m n `bindL` k = Plus plus (m `bindL` k) (n `bindL` k)
+Plus dict m n `bindL` k = Plus dict (m `bindL` k) (n `bindL` k)
 Ap _ f a `bindL` k = Bind f $ \ f' -> a >>= k . f'
 Bind m f `bindL` g = Bind m $ f >=> g
-Fix k `bindL` k' = Fix $ \ a0 -> k a0 `bindL` \ (a1, a') -> liftM' (\ b -> (a1, b)) $ k' a'
+Fix k `bindL` k' = Fix $ \ a0 -> k a0 `bindL` \ (a1, a') -> liftM' ((,) a1) $ k' a'
 Lift m `bindL` k = Bind m k
 
 m `bindR` k = liftM' snd $ mfix $ zipMR m . k . fst
@@ -181,17 +196,17 @@ zipM', zipML, zipMR :: Monad m => Perm m a -> Perm m b -> Perm m (a, b)
 
 zipM' m n = zipML m n <> zipMR m n
 
-zipML (Plus plus m n) b = Plus plus (zipML m b) (zipML n b)
+zipML (Plus dict m n) b = Plus dict (zipML m b) (zipML n b)
 zipML (Ap ap f a) b = Ap ap (liftM mapFst f) $ zipM' a b
 zipML (Bind m k) n = Bind m $ \ a -> zipM' (k a) n
 zipML (Fix k) n = Fix $ \ a0 -> liftM' (\ ((a1, a'), b') -> (a1, (a', b'))) $ zipML (k a0) n
-zipML (Lift m) n = Ap monad (liftM (,) m) n
+zipML (Lift m) n = Ap Monad.ap (liftM (,) m) n
 
-zipMR a (Plus plus m n) = Plus plus (zipMR a m) (zipMR a n)
+zipMR a (Plus dict m n) = Plus dict (zipMR a m) (zipMR a n)
 zipMR a (Ap ap f b) = Ap ap (liftM fmap f) $ zipM' a b
 zipMR m (Bind n k) = Bind n $ zipM' m . k
-zipMR m (Fix k) = Fix $ liftM' (\ (a, (a', b)) -> (a', (a, b))) . zipMR m . k
-zipMR m (Lift n) = Ap monad (liftM (flip (,)) n) m
+zipMR m (Fix k) = Fix $ \ a0 -> liftM' (\ (a, (a1, b)) -> (a1, (a, b))) $ zipMR m (k a0)
+zipMR m (Lift n) = Ap Monad.ap (liftM (flip (,)) n) m
 
 instance (MonadFix m, MonadPlus m) => MonadPlus (Perm m) where
   mzero = lift mzero
@@ -206,21 +221,28 @@ instance MonadTrans Perm where
 instance (MonadFix m, MonadIO m) => MonadIO (Perm m) where
   liftIO = lift . liftIO
 
+instance (MonadFix m, MonadPlus m, MonadCont m) => MonadCont (Perm m) where
+  callCC f = lift $ callCC $ \ c -> sum1M (f (lift . c))
+
+instance (MonadFix m, MonadPlus m, MonadError e m) => MonadError e (Perm m) where
+  throwError = lift . throwError
+  m `catchError` h = lift $ sum1M m `catchError` (sum1M . h)
+
 instance (MonadFix m, MonadReader r m) => MonadReader r (Perm m) where
   ask = lift ask
-  local f (Plus plus m n) = Plus plus (local f m) (local f n)
-  local f (Ap ap g a) = Ap ap (local f g) (local f a)
+  local f (Plus dict m n) = Plus dict (local f m) (local f n)
+  local f (Ap dict g a) = Ap dict (local f g) (local f a)
   local f (Bind m k) = Bind (local f m) (local f . k)
   local f (Fix k) = Fix $ local f . k
   local f (Lift m) = Lift $ local f m
-#if MIN_VERSION_mtl(2, 1, 0)
+#if MIN_VERSION_mtl (2, 1, 0)
   reader = lift . reader
 #endif
 
 instance (MonadFix m, MonadState s m) => MonadState s (Perm m) where
   get = lift get
   put = lift . put
-#if MIN_VERSION_mtl(2, 1, 0)
+#if MIN_VERSION_mtl (2, 1, 0)
   state = lift . state
 #endif
 
@@ -231,12 +253,17 @@ instance (MonadFix m, MonadThrow e m) => MonadThrow e (Perm m) where
   throw = lift . throw
 #endif
 
+instance (MonadFix m, MonadPlus m, MonadWriter w m) => MonadWriter w (Perm m) where
+  tell = lift . tell
+  listen = lift . listen . sum1M
+  pass = lift . pass . sum1M
+#if MIN_VERSION_mtl (2, 1, 0)
+  writer = lift . writer
+#endif
+
 infixr 6 <>
 (<>) :: Perm m a -> Perm m a -> Perm m a
 (<>) = Plus unit
-
-zipA :: Applicative m => m a -> m b -> m (a, b)
-zipA m n = (,) <$> m <*> n
 
 mapFst :: (a -> a') -> (a, b) -> (a', b)
 mapFst f (a, b) = (f a, b)
